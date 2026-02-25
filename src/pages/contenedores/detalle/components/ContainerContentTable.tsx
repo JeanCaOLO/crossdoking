@@ -23,81 +23,113 @@ export default function ContainerContentTable({ rows, containerStatus, onReverse
 
   if (rows.length === 0) {
     return (
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-        <div className="w-16 h-16 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-          <i className="ri-inbox-line text-3xl text-gray-400"></i>
+      <div className="bg-white rounded-xl border border-gray-100 p-10 text-center">
+        <div className="w-14 h-14 bg-gray-50 rounded-2xl flex items-center justify-center mx-auto mb-3">
+          <i className="ri-inbox-line text-3xl text-gray-300"></i>
         </div>
-        <p className="text-sm text-gray-600">No hay líneas en este contenedor</p>
+        <p className="text-sm text-gray-500">No hay líneas en este contenedor</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-      <div className="px-6 py-4 border-b border-gray-200">
-        <h3 className="text-lg font-bold text-gray-900">Contenido del Contenedor</h3>
-        <p className="text-sm text-gray-600 mt-1">{rows.length} líneas registradas</p>
+    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+      <div className="px-4 py-3 md:px-6 md:py-4 border-b border-gray-100">
+        <h3 className="text-base md:text-lg font-bold text-gray-900">Contenido del Contenedor</h3>
+        <p className="text-xs text-gray-500 mt-0.5">{rows.length} líneas registradas</p>
       </div>
 
-      <div className="overflow-x-auto">
+      {/* Mobile card list */}
+      <div className="md:hidden divide-y divide-gray-100">
+        {rows.map((row) => (
+          <div key={row.id} className="p-4 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-8 h-8 bg-gradient-to-br from-teal-500 to-cyan-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <i className="ri-stack-line text-white text-sm"></i>
+                </div>
+                <span className="text-sm font-bold text-gray-900 font-mono truncate">{row.pallet_code}</span>
+              </div>
+              <span className="text-xl font-bold text-teal-600 flex-shrink-0">{row.qty}</span>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-sky-100 text-sky-700 font-mono">
+                {row.sku}
+              </span>
+              {row.ubicacion && (
+                <span className="text-xs text-gray-500">
+                  <i className="ri-map-pin-line mr-0.5"></i>{row.ubicacion}
+                </span>
+              )}
+            </div>
+
+            {row.descripcion && (
+              <p className="text-xs text-gray-600 leading-snug">{row.descripcion}</p>
+            )}
+
+            {row.barcode && (
+              <p className="text-xs text-gray-400 font-mono">{row.barcode}</p>
+            )}
+
+            {canReverse && (
+              <button
+                onClick={() => onReverse?.(row.id)}
+                className="w-full mt-1 py-2.5 bg-amber-50 text-amber-700 rounded-lg text-xs font-semibold hover:bg-amber-100 active:bg-amber-200 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <i className="ri-arrow-go-back-line"></i>
+                Reversar línea
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table */}
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full">
-          <thead className="bg-gray-50 border-b border-gray-200">
+          <thead className="bg-gray-50 border-b border-gray-100">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                Pallet
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                Ubicación
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                SKU
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                Descripción
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                Código de Barra
-              </th>
-              <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                Cantidad
-              </th>
+              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Pallet</th>
+              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Ubicación</th>
+              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">SKU</th>
+              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Descripción</th>
+              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Código de Barra</th>
+              <th className="px-6 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Cantidad</th>
               {canReverse && (
-                <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                  Acciones
-                </th>
+                <th className="px-6 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Acciones</th>
               )}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
+          <tbody className="divide-y divide-gray-100">
             {rows.map((row) => (
               <tr key={row.id} className="hover:bg-gray-50 transition-colors">
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex items-center">
-                    <div className="w-8 h-8 bg-gradient-to-br from-teal-500 to-cyan-600 rounded-lg flex items-center justify-center mr-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-gradient-to-br from-teal-500 to-cyan-600 rounded-lg flex items-center justify-center">
                       <i className="ri-stack-line text-white text-sm"></i>
                     </div>
-                    <span className="text-sm font-medium text-gray-900">{row.pallet_code}</span>
+                    <span className="text-sm font-semibold text-gray-900 font-mono">{row.pallet_code}</span>
                   </div>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{row.ubicacion || '—'}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{row.ubicacion || '—'}</td>
                 <td className="px-6 py-4 whitespace-nowrap">
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-sky-100 text-sky-700">
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-sky-100 text-sky-700 font-mono">
                     {row.sku}
                   </span>
                 </td>
-                <td className="px-6 py-4 text-sm text-gray-900">{row.descripcion || '—'}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{row.barcode || '—'}</td>
+                <td className="px-6 py-4 text-sm text-gray-700">{row.descripcion || '—'}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">{row.barcode || '—'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-center">
-                  <span className="text-sm font-semibold text-teal-600">{row.qty}</span>
+                  <span className="text-sm font-bold text-teal-600">{row.qty}</span>
                 </td>
                 {canReverse && (
                   <td className="px-6 py-4 whitespace-nowrap text-center">
                     <button
                       onClick={() => onReverse?.(row.id)}
-                      className="inline-flex items-center px-3 py-1.5 bg-amber-50 text-amber-700 rounded-lg text-xs font-medium hover:bg-amber-100 transition-colors whitespace-nowrap cursor-pointer"
-                      title="Reversar esta línea"
+                      className="inline-flex items-center px-3 py-1.5 bg-amber-50 text-amber-700 rounded-lg text-xs font-semibold hover:bg-amber-100 transition-colors cursor-pointer gap-1.5"
                     >
-                      <i className="ri-arrow-go-back-line mr-1.5"></i>
+                      <i className="ri-arrow-go-back-line"></i>
                       Reversar
                     </button>
                   </td>

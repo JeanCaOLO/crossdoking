@@ -86,6 +86,7 @@ export interface Container {
   import_id: string;
   tienda: string;
   status: 'OPEN' | 'CLOSED' | 'DISPATCHED';
+  type?: 'NORMAL' | 'SOBRANTE';
   created_by: string;
   created_at: string;
   closed_at?: string;

@@ -8,48 +8,35 @@ interface Props {
 }
 
 export default function AppLayout({ children }: Props) {
-  const [sidebarWidth, setSidebarWidth] = useState(240);
+  const [isMobile, setIsMobile] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    // Helper to safely read the sidebar width
-    const updateWidth = () => {
-      const aside = document.querySelector('aside');
-      if (aside) {
-        setSidebarWidth(aside.offsetWidth);
-      }
-    };
-
-    // Observe class changes that may affect the width
-    const observer = new MutationObserver(updateWidth);
-    const aside = document.querySelector('aside');
-
-    if (aside) {
-      updateWidth();
-      observer.observe(aside, {
-        attributes: true,
-        attributeFilter: ['class'],
-      });
-    }
-
-    // Fallback polling (in case the observer misses a change)
-    const interval = setInterval(updateWidth, 350);
-
-    // Cleanup
-    return () => {
-      observer.disconnect();
-      clearInterval(interval);
-    };
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
   }, []);
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Sidebar />
-      <div
-        className="transition-all duration-300"
-        style={{ marginLeft: sidebarWidth }}
-      >
-        <TopBar />
-        <main className="p-6">{children}</main>
+      <Sidebar
+        isMobile={isMobile}
+        mobileOpen={sidebarOpen}
+        onMobileClose={() => setSidebarOpen(false)}
+      />
+
+      {/* Overlay for mobile sidebar */}
+      {isMobile && sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/40 z-30"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      <div className={`transition-all duration-300 ${isMobile ? 'ml-0' : 'ml-[240px]'}`}>
+        <TopBar onMenuClick={() => setSidebarOpen(true)} isMobile={isMobile} />
+        <main className="p-4 md:p-6 pb-6">{children}</main>
       </div>
     </div>
   );

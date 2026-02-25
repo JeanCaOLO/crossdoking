@@ -6,12 +6,11 @@ export default function Navbar() {
   const location = useLocation();
 
   const navItems = [
-    { path: '/dashboard', label: 'Dashboard', icon: 'ri-dashboard-line', roles: ['ADMIN', 'SUPERVISOR', 'OPERADOR', 'AUDITOR'] },
-    { path: '/cargas', label: 'Cargas', icon: 'ri-file-list-3-line', roles: ['ADMIN', 'SUPERVISOR', 'OPERADOR', 'AUDITOR'] },
-    { path: '/operacion', label: 'Operación', icon: 'ri-qr-scan-2-line', roles: ['ADMIN', 'SUPERVISOR', 'OPERADOR'] },
-    { path: '/contenedores', label: 'Contenedores', icon: 'ri-inbox-line', roles: ['ADMIN', 'SUPERVISOR', 'OPERADOR', 'AUDITOR'] },
-    { path: '/auditoria', label: 'Auditoría', icon: 'ri-file-list-line', roles: ['ADMIN', 'SUPERVISOR', 'AUDITOR'] },
-    { path: '/usuarios', label: 'Usuarios', icon: 'ri-user-settings-line', roles: ['ADMIN'] },
+    { path: '/dashboard', label: 'Dashboard', icon: 'ri-dashboard-line', roles: ['ADMIN', 'VISUALIZADOR'] },
+    { path: '/cargas', label: 'Cargas', icon: 'ri-file-list-3-line', roles: ['ADMIN'] },
+    { path: '/operacion', label: 'Operación', icon: 'ri-qr-scan-2-line', roles: ['ADMIN', 'OPERATOR'] },
+    { path: '/contenedores', label: 'Contenedores', icon: 'ri-inbox-line', roles: ['ADMIN', 'OPERATOR'] },
+    { path: '/reportes', label: 'Reportes', icon: 'ri-bar-chart-box-line', roles: ['ADMIN', 'VISUALIZADOR'] },
   ];
 
   const handleSignOut = async () => {
@@ -21,6 +20,11 @@ export default function Navbar() {
       console.error('Error al cerrar sesión:', error);
     }
   };
+
+  // Filtrar ítems según el rol del usuario
+  const filteredNavItems = navItems.filter(item => 
+    user && item.roles.includes(user.role)
+  );
 
   return (
     <nav className="bg-white border-b border-gray-200">
@@ -35,29 +39,37 @@ export default function Navbar() {
             </Link>
 
             <div className="hidden md:flex items-center space-x-1">
-              {navItems
-                .filter((item) => user && item.roles.includes(user.role))
-                .map((item) => (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
-                      location.pathname === item.path || location.pathname.startsWith(item.path + '/')
-                        ? 'bg-teal-50 text-teal-700'
-                        : 'text-gray-700 hover:bg-gray-100'
-                    }`}
-                  >
-                    <i className={`${item.icon} mr-2`}></i>
-                    {item.label}
-                  </Link>
-                ))}
+              {filteredNavItems.map((item) => (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+                    location.pathname === item.path || location.pathname.startsWith(item.path + '/')
+                      ? 'bg-teal-50 text-teal-700'
+                      : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  <i className={`${item.icon} mr-2`}></i>
+                  {item.label}
+                </Link>
+              ))}
             </div>
           </div>
 
           <div className="flex items-center space-x-4">
             <div className="text-right hidden sm:block">
               <p className="text-sm font-medium text-gray-900">{user?.full_name}</p>
-              <p className="text-xs text-gray-600">{user?.role}</p>
+              <div className="flex items-center justify-end space-x-2">
+                <span className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${
+                  user?.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' :
+                  user?.role === 'OPERATOR' ? 'bg-blue-100 text-blue-700' :
+                  'bg-gray-100 text-gray-700'
+                }`}>
+                  {user?.role === 'ADMIN' ? 'Administrador' :
+                   user?.role === 'OPERATOR' ? 'Operador' :
+                   'Visualizador'}
+                </span>
+              </div>
             </div>
             <button
               onClick={handleSignOut}

@@ -1,4 +1,3 @@
-
 import { Link } from 'react-router-dom';
 
 interface ContainerHeaderProps {
@@ -53,27 +52,23 @@ export default function ContainerHeader({
         Volver a Contenedores
       </Link>
 
-      <div className="bg-white rounded-xl border border-gray-100 p-5 mt-2">
-        <div className="flex items-start justify-between flex-wrap gap-4">
-          <div className="flex items-center space-x-4">
-            <div className="w-12 h-12 bg-gradient-to-br from-rose-500 to-rose-600 rounded-lg flex items-center justify-center">
-              <i className="ri-inbox-line text-2xl text-white"></i>
+      <div className="bg-white rounded-xl border border-gray-100 p-4 md:p-5 mt-2">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-br from-rose-500 to-rose-600 rounded-lg flex items-center justify-center flex-shrink-0">
+              <i className="ri-inbox-line text-xl md:text-2xl text-white"></i>
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">{code}</h2>
-              <p className="text-sm text-gray-500 mt-0.5">
-                Tienda: <strong className="text-gray-700">{tienda}</strong>
+              <h2 className="text-lg md:text-xl font-bold text-gray-900 font-mono">{code}</h2>
+              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                <span className="text-sm text-gray-600 font-medium">{tienda}</span>
                 {camion && (
-                  <>
-                    {' '}
-                    &middot;{' '}
-                    <span className="inline-flex items-center text-amber-600 font-medium">
-                      <i className="ri-truck-line mr-1"></i>
-                      {camion}
-                    </span>
-                  </>
+                  <span className="inline-flex items-center gap-1 text-xs text-amber-600 font-medium">
+                    <i className="ri-truck-line"></i>
+                    {camion}
+                  </span>
                 )}
-              </p>
+              </div>
             </div>
           </div>
           <span className={`px-3 py-1.5 rounded-full text-xs font-semibold ${info.bg}`}>
@@ -81,21 +76,21 @@ export default function ContainerHeader({
           </span>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-5 pt-5 border-t border-gray-100">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 pt-4 border-t border-gray-100">
           <div>
-            <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Creado</p>
-            <p className="text-sm text-gray-800 mt-1">{formatDate(createdAt)}</p>
+            <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium">Creado</p>
+            <p className="text-xs md:text-sm text-gray-800 mt-1">{formatDate(createdAt)}</p>
           </div>
           {closedAt && (
             <div>
-              <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Cerrado</p>
-              <p className="text-sm text-gray-800 mt-1">{formatDate(closedAt)}</p>
+              <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium">Cerrado</p>
+              <p className="text-xs md:text-sm text-gray-800 mt-1">{formatDate(closedAt)}</p>
             </div>
           )}
           {createdByEmail && (
             <div>
-              <p className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Creado por</p>
-              <p className="text-sm text-gray-800 mt-1">{createdByEmail}</p>
+              <p className="text-[10px] uppercase tracking-wider text-gray-400 font-medium">Creado por</p>
+              <p className="text-xs md:text-sm text-gray-800 mt-1">{createdByEmail}</p>
             </div>
           )}
         </div>

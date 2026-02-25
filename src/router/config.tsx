@@ -1,7 +1,9 @@
+
 import React, { lazy } from 'react';
 import { RouteObject, Navigate } from 'react-router-dom';
 import ProtectedRoute from '../components/layout/ProtectedRoute';
 import AppLayout from '../components/layout/AppLayout';
+import { useAuth, UserRole } from '../contexts/AuthContext';
 
 const DashboardPage = lazy(() => import('../pages/dashboard/page'));
 const LoginPage = lazy(() => import('../pages/login/page'));
@@ -14,18 +16,17 @@ const ReportesMovimientosPage = lazy(() => import('../pages/reportes/page'));
 const ContenedoresPage = lazy(() => import('../pages/contenedores/page'));
 const ContenedorDetallePage = lazy(() => import('../pages/contenedores/detalle/page'));
 
-function WithLayout({ children }: { children: React.ReactNode }) {
+function WithLayout({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: UserRole[] }) {
   return (
     <AppLayout>
-      <ProtectedRoute>{children}</ProtectedRoute>
+      <ProtectedRoute allowedRoles={allowedRoles}>{children}</ProtectedRoute>
     </AppLayout>
   );
 }
 
-// Componente para manejar la ruta raíz con redirect condicional
 function RootRedirect() {
-  const { session, loading } = useAuth();
-  
+  const { session, user, loading } = useAuth();
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -36,26 +37,28 @@ function RootRedirect() {
       </div>
     );
   }
-  
-  return <Navigate to={session ? "/dashboard" : "/login"} replace />;
+
+  if (!session || !user) return <Navigate to="/login" replace />;
+
+  switch (user.role) {
+    case 'ADMIN':
+      return <Navigate to="/dashboard" replace />;
+    case 'OPERATOR':
+      return <Navigate to="/operacion" replace />;
+    case 'VISUALIZADOR':
+      return <Navigate to="/dashboard" replace />;
+    default:
+      return <Navigate to="/login" replace />;
+  }
 }
 
-// Importar useAuth
-import { useAuth } from '../contexts/AuthContext';
-
 const routes: RouteObject[] = [
-  {
-    path: '/',
-    element: <RootRedirect />,
-  },
-  {
-    path: '/login',
-    element: <LoginPage />,
-  },
+  { path: '/', element: <RootRedirect /> },
+  { path: '/login', element: <LoginPage /> },
   {
     path: '/dashboard',
     element: (
-      <WithLayout>
+      <WithLayout allowedRoles={['ADMIN', 'VISUALIZADOR']}>
         <DashboardPage />
       </WithLayout>
     ),
@@ -63,7 +66,7 @@ const routes: RouteObject[] = [
   {
     path: '/cargas',
     element: (
-      <WithLayout>
+      <WithLayout allowedRoles={['ADMIN']}>
         <CargasPage />
       </WithLayout>
     ),
@@ -71,7 +74,7 @@ const routes: RouteObject[] = [
   {
     path: '/cargas/nueva',
     element: (
-      <WithLayout>
+      <WithLayout allowedRoles={['ADMIN']}>
         <NuevaCargaPage />
       </WithLayout>
     ),
@@ -79,7 +82,7 @@ const routes: RouteObject[] = [
   {
     path: '/cargas/:id',
     element: (
-      <WithLayout>
+      <WithLayout allowedRoles={['ADMIN']}>
         <DetalleCargaPage />
       </WithLayout>
     ),
@@ -87,7 +90,7 @@ const routes: RouteObject[] = [
   {
     path: '/operacion',
     element: (
-      <WithLayout>
+      <WithLayout allowedRoles={['ADMIN', 'OPERATOR']}>
         <OperacionPage />
       </WithLayout>
     ),
@@ -95,7 +98,7 @@ const routes: RouteObject[] = [
   {
     path: '/operacion/reportes',
     element: (
-      <WithLayout>
+      <WithLayout allowedRoles={['ADMIN', 'OPERATOR']}>
         <ReportesPage />
       </WithLayout>
     ),
@@ -103,7 +106,7 @@ const routes: RouteObject[] = [
   {
     path: '/reportes',
     element: (
-      <WithLayout>
+      <WithLayout allowedRoles={['ADMIN', 'VISUALIZADOR']}>
         <ReportesMovimientosPage />
       </WithLayout>
     ),
@@ -111,7 +114,7 @@ const routes: RouteObject[] = [
   {
     path: '/contenedores',
     element: (
-      <WithLayout>
+      <WithLayout allowedRoles={['ADMIN', 'OPERATOR']}>
         <ContenedoresPage />
       </WithLayout>
     ),
@@ -119,7 +122,7 @@ const routes: RouteObject[] = [
   {
     path: '/contenedores/:id',
     element: (
-      <WithLayout>
+      <WithLayout allowedRoles={['ADMIN', 'OPERATOR']}>
         <ContenedorDetallePage />
       </WithLayout>
     ),

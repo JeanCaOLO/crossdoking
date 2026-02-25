@@ -1,6 +1,13 @@
+
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth, UserRole } from '../../contexts/AuthContext';
+
+const roleDefaultRoute: Record<UserRole, string> = {
+  ADMIN: '/dashboard',
+  OPERATOR: '/operacion',
+  VISUALIZADOR: '/dashboard',
+};
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -10,23 +17,11 @@ export default function LoginPage() {
   const { signIn, session, user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
 
-  // Si ya hay sesión activa, redirigir al dashboard (solo cuando termine de cargar)
   useEffect(() => {
-    if (authLoading) {
-      console.log('⏳ [LOGIN] AuthContext aún cargando, esperando...');
-      return;
-    }
-
-    console.log('🔍 [LOGIN] Verificando sesión existente:', {
-      hasSession: !!session,
-      hasUser: !!user,
-    });
-
+    if (authLoading) return;
     if (session && user) {
-      console.log('✅ [LOGIN] Sesión activa detectada, redirigiendo a /dashboard');
-      navigate('/dashboard', { replace: true });
-    } else {
-      console.log('ℹ️ [LOGIN] Sin sesión, mostrando formulario de login');
+      const route = roleDefaultRoute[user.role] ?? '/dashboard';
+      navigate(route, { replace: true });
     }
   }, [session, user, authLoading, navigate]);
 
@@ -34,22 +29,15 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
-
-    console.log('🔐 [LOGIN] Intentando login con:', email);
-
     try {
       await signIn(email, password);
-      console.log('✅ [LOGIN] Login exitoso, navegando a /dashboard');
-      navigate('/dashboard', { replace: true });
+      // La redirección la maneja el useEffect cuando user se cargue
     } catch (err: any) {
-      console.error('❌ [LOGIN] Error:', err);
       setError(err.message || 'Error al iniciar sesión');
-    } finally {
       setLoading(false);
     }
   };
 
-  // Mostrar loader mientras AuthContext verifica la sesión inicial
   if (authLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-teal-50 to-cyan-50 flex items-center justify-center">
@@ -126,7 +114,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-teal-600 hover:bg-teal-700 text-white font-medium py-3 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 whitespace-nowrap"
+            className="w-full bg-teal-600 hover:bg-teal-700 text-white font-medium py-3 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer"
           >
             {loading ? (
               <>
