@@ -191,13 +191,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     try {
-      const { error: signOutError } = await supabase.auth.signOut();
-      if (signOutError) throw signOutError;
+      // Intentar logout global
+      const { error: signOutError } = await supabase.auth.signOut({ scope: 'global' });
+      
+      // Si el error es session_not_found, tratarlo como logout exitoso
+      if (signOutError && signOutError.message !== 'session_not_found') {
+        console.error('[AuthContext] Error en signOut:', signOutError);
+        throw signOutError;
+      }
+
+      // Si session_not_found, solo log debug (no es error real)
+      if (signOutError?.message === 'session_not_found') {
+        console.debug('[AuthContext] Session ya no existe en servidor, limpiando local');
+      }
+
+      // Siempre limpiar estado local (tokens/storage)
       setSession(null);
       setUser(null);
       setError(null);
       setLoading(false);
     } catch (err: any) {
+      // Solo propagar errores reales (no session_not_found)
+      console.error('[AuthContext] Error crítico en signOut:', err);
       throw err;
     }
   };

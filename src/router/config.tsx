@@ -1,4 +1,3 @@
-
 import React, { lazy } from 'react';
 import { RouteObject, Navigate } from 'react-router-dom';
 import ProtectedRoute from '../components/layout/ProtectedRoute';
@@ -15,6 +14,7 @@ const ReportesPage = lazy(() => import('../pages/operacion/reportes/page'));
 const ReportesMovimientosPage = lazy(() => import('../pages/reportes/page'));
 const ContenedoresPage = lazy(() => import('../pages/contenedores/page'));
 const ContenedorDetallePage = lazy(() => import('../pages/contenedores/detalle/page'));
+const ContenedoresCerradosPage = lazy(() => import('../pages/reportes/contenedores_cerrados/page'));
 
 function WithLayout({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: UserRole[] }) {
   return (
@@ -108,6 +108,14 @@ const routes: RouteObject[] = [
     element: (
       <WithLayout allowedRoles={['ADMIN', 'VISUALIZADOR']}>
         <ReportesMovimientosPage />
+      </WithLayout>
+    ),
+  },
+  {
+    path: '/reportes/contenedores-cerrados',
+    element: (
+      <WithLayout allowedRoles={['ADMIN', 'VISUALIZADOR']}>
+        <ContenedoresCerradosPage />
       </WithLayout>
     ),
   },

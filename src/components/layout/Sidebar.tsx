@@ -15,6 +15,7 @@ const navItems = [
   { path: '/operacion', label: 'Operación', icon: 'ri-qr-scan-2-line', roles: ['ADMIN', 'OPERATOR'] },
   { path: '/contenedores', label: 'Contenedores', icon: 'ri-inbox-line', roles: ['ADMIN', 'OPERATOR'] },
   { path: '/reportes', label: 'Reportes', icon: 'ri-bar-chart-box-line', roles: ['ADMIN', 'VISUALIZADOR'] },
+  { path: '/reportes/contenedores-cerrados', label: 'Cont. Cerrados', icon: 'ri-archive-line', roles: ['ADMIN', 'VISUALIZADOR'] },
 ];
 
 function RoleBadge({ role }: { role: string }) {

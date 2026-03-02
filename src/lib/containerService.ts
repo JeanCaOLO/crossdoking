@@ -47,18 +47,32 @@ export async function getOrCreateOpenContainer(
       // 1. Buscar contenedor OPEN existente para esta tienda e import
       const { data: existingContainer } = await supabase
         .from('containers')
-        .select('id')
+        .select('id, code')
         .eq('import_id', importId)
         .eq('tienda', tienda)
         .eq('status', 'OPEN')
         .maybeSingle();
 
       if (existingContainer) {
+        console.log(
+          `[ContainerService] ♻️  Reutilizando contenedor OPEN existente` +
+          ` | ID: ${existingContainer.id}` +
+          ` | Código: ${existingContainer.code}` +
+          ` | Import: ${importId}` +
+          ` | Tienda: ${tienda}`
+        );
         return existingContainer.id;
       }
 
       // 2. No existe → crear nuevo contenedor
       const code = await generateContainerCode();
+      console.log(
+        `[ContainerService] 🆕 Creando nuevo contenedor` +
+        ` | Código generado: ${code}` +
+        ` | Import: ${importId}` +
+        ` | Tienda: ${tienda}` +
+        ` | Usuario: ${userId}`
+      );
 
       const { data: newContainer, error: insertError } = await supabase
         .from('containers')
@@ -75,15 +89,23 @@ export async function getOrCreateOpenContainer(
       if (insertError) {
         // Si hay error de duplicado de código, reintentar
         if (insertError.code === '23505') {
+          console.warn(`[ContainerService] ⚠️  Código duplicado (${code}), reintentando... (intento ${attempt + 1}/${maxRetries})`);
           attempt++;
           continue;
         }
         throw insertError;
       }
 
+      console.log(
+        `[ContainerService] ✅ Contenedor creado exitosamente` +
+        ` | ID: ${newContainer.id}` +
+        ` | Código: ${code}` +
+        ` | Tienda: ${tienda}`
+      );
       return newContainer.id;
     } catch (error) {
       attempt++;
+      console.error(`[ContainerService] ❌ Error en intento ${attempt}/${maxRetries}:`, error);
       if (attempt >= maxRetries) {
         throw new Error(`Error al crear contenedor después de ${maxRetries} intentos: ${error}`);
       }
@@ -135,18 +157,29 @@ export async function addContainerLineWithValidation(
   sourceImportLineId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    console.log(
+      `[ContainerService] 🔍 Validando inserción de línea` +
+      ` | Container: ${containerId}` +
+      ` | Pallet: ${palletId}` +
+      ` | SKU: ${sku}` +
+      ` | Qty (delta): ${qty}` +
+      ` | Source Line: ${sourceImportLineId}`
+    );
+
     // ✅ VALIDACIÓN 1: Verificar que el contenedor esté OPEN
     const { data: container } = await supabase
       .from('containers')
-      .select('status')
+      .select('status, code')
       .eq('id', containerId)
       .maybeSingle();
 
     if (!container) {
+      console.warn(`[ContainerService] ⚠️  Contenedor no encontrado: ${containerId}`);
       return { success: false, error: 'Contenedor no encontrado' };
     }
 
     if (container.status !== 'OPEN') {
+      console.warn(`[ContainerService] ⚠️  Contenedor ${container.code} no está OPEN (estado: ${container.status})`);
       return { success: false, error: `El contenedor está en estado ${container.status} y no permite agregar líneas` };
     }
 
@@ -159,6 +192,12 @@ export async function addContainerLineWithValidation(
       .maybeSingle();
 
     if (!inventory || inventory.qty_available < qty) {
+      console.warn(
+        `[ContainerService] ⚠️  Inventario insuficiente` +
+        ` | SKU: ${sku}` +
+        ` | Disponible: ${inventory?.qty_available ?? 0}` +
+        ` | Solicitado: ${qty}`
+      );
       return { success: false, error: 'Cantidad no disponible en inventario del pallet' };
     }
 
@@ -170,11 +209,17 @@ export async function addContainerLineWithValidation(
       .maybeSingle();
 
     if (!importLine) {
+      console.warn(`[ContainerService] ⚠️  Import line no encontrada: ${sourceImportLineId}`);
       return { success: false, error: 'Línea de importación no encontrada' };
     }
 
     const pending = importLine.qty_to_send - importLine.qty_confirmed;
     if (qty > pending) {
+      console.warn(
+        `[ContainerService] ⚠️  Qty supera pendiente` +
+        ` | Pendiente: ${pending}` +
+        ` | Solicitado: ${qty}`
+      );
       return { success: false, error: 'Cantidad mayor al pendiente del pedido' };
     }
 
@@ -190,12 +235,19 @@ export async function addContainerLineWithValidation(
       });
 
     if (insertError) {
+      console.error(`[ContainerService] ❌ Error insertando container_line:`, insertError);
       return { success: false, error: `Error al insertar línea: ${insertError.message}` };
     }
 
+    console.log(
+      `[ContainerService] ✅ Container line insertada` +
+      ` | Container: ${containerId} (${container.code})` +
+      ` | SKU: ${sku}` +
+      ` | Qty (delta): ${qty}`
+    );
     return { success: true };
   } catch (error) {
-    console.error('Error en addContainerLineWithValidation:', error);
+    console.error('[ContainerService] ❌ Error en addContainerLineWithValidation:', error);
     return { success: false, error: error instanceof Error ? error.message : 'Error desconocido' };
   }
 }
@@ -208,18 +260,22 @@ export async function closeContainer(
   userId: string
 ): Promise<{ success: boolean; error?: string; code?: string; lineCount?: number }> {
   try {
+    console.log(`[ContainerService] 🔒 Iniciando cierre de contenedor | ID: ${containerId}`);
+
     // ✅ VALIDACIÓN 1: Verificar que el contenedor exista y esté OPEN
     const { data: container } = await supabase
       .from('containers')
-      .select('id, code, status')
+      .select('id, code, status, tienda')
       .eq('id', containerId)
       .maybeSingle();
 
     if (!container) {
+      console.warn(`[ContainerService] ⚠️  Contenedor no encontrado: ${containerId}`);
       return { success: false, error: 'Contenedor no encontrado' };
     }
 
     if (container.status !== 'OPEN') {
+      console.warn(`[ContainerService] ⚠️  Contenedor ${container.code} ya está en estado ${container.status}`);
       return { success: false, error: `El contenedor ya está en estado ${container.status}` };
     }
 
@@ -230,6 +286,7 @@ export async function closeContainer(
       .eq('container_id', containerId);
 
     if (!count || count === 0) {
+      console.warn(`[ContainerService] ⚠️  Contenedor ${container.code} no tiene líneas, no se puede cerrar`);
       return { success: false, error: 'El contenedor no tiene líneas. Confirma cantidades antes de cerrar.' };
     }
 
@@ -243,12 +300,20 @@ export async function closeContainer(
       .eq('id', containerId);
 
     if (updateError) {
+      console.error(`[ContainerService] ❌ Error cerrando contenedor ${container.code}:`, updateError);
       return { success: false, error: `Error al cerrar contenedor: ${updateError.message}` };
     }
 
+    console.log(
+      `[ContainerService] ✅ Contenedor cerrado exitosamente` +
+      ` | Código: ${container.code}` +
+      ` | Tienda: ${container.tienda}` +
+      ` | Líneas totales: ${count}` +
+      ` | Cerrado por: ${userId}`
+    );
     return { success: true, code: container.code, lineCount: count };
   } catch (error) {
-    console.error('Error en closeContainer:', error);
+    console.error('[ContainerService] ❌ Error en closeContainer:', error);
     return { success: false, error: error instanceof Error ? error.message : 'Error desconocido' };
   }
 }

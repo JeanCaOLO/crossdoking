@@ -124,7 +124,7 @@ export function useDashboardStats(refreshInterval = 10000) {
           .select('camion'),
         supabase
           .from('import_lines')
-          .select('qty_ordered, qty_confirmed'),
+          .select('qty_to_send, qty_confirmed'),
       ]);
 
       const tl = totalLines?.count ?? 0;
@@ -141,9 +141,9 @@ export function useDashboardStats(refreshInterval = 10000) {
       const camionSet = new Set(uniqueCamiones?.data?.map(item => item.camion).filter(Boolean) ?? []);
 
       // Calcular totales de unidades
-      const totalUnits = totalUnitsData?.data?.reduce((sum, line) => sum + (line.qty_ordered || 0), 0) ?? 0;
+      const totalUnits = totalUnitsData?.data?.reduce((sum, line) => sum + (line.qty_to_send || 0), 0) ?? 0;
       const totalConfirmed = totalUnitsData?.data?.reduce((sum, line) => sum + (line.qty_confirmed || 0), 0) ?? 0;
-      const totalPending = totalUnits - totalConfirmed;
+      const totalPending = Math.max(0, totalUnits - totalConfirmed);
 
       setStats({
         activeImports: activeImports?.count ?? 0,
