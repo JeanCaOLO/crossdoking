@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useRef, useEffect, useMemo } from 'react';
@@ -7,6 +6,7 @@ import { supabase, Pallet, PalletInventory, ImportLine } from '../../lib/supabas
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/base/Toast';
 import DistribucionModal from './components/DistribucionModal';
+import { printContainerById } from '../../services/printing/containerPrint';
 
 export default function OperacionPage() {
   const { user } = useAuth();
@@ -41,6 +41,12 @@ export default function OperacionPage() {
   const [minAvailable, setMinAvailable] = useState('');
   const [debouncedSearchSku, setDebouncedSearchSku] = useState('');
   const [debouncedMinAvailable, setDebouncedMinAvailable] = useState('');
+
+  // Reimprimir modal state
+  const [showReprintModal, setShowReprintModal] = useState(false);
+  const [closedContainers, setClosedContainers] = useState<any[]>([]);
+  const [loadingReprint, setLoadingReprint] = useState(false);
+  const [reprintingId, setReprintingId] = useState<string | null>(null);
 
   const pageSize = 10;
   const totalPages = Math.ceil(inventoryTotal / pageSize);
@@ -472,6 +478,56 @@ export default function OperacionPage() {
     setShowDistribucion(true);
   };
 
+  // ── Cargar contenedores cerrados de la tienda actual ──
+  const loadClosedContainers = async () => {
+    if (selectedStore === 'ALL') {
+      showToast('warning', 'Selecciona una tienda', 'Debes filtrar por una tienda específica para reimprimir');
+      return;
+    }
+
+    setLoadingReprint(true);
+    try {
+      const { data, error } = await supabase
+        .from('containers')
+        .select('id, code, tienda, status, closed_at, created_at')
+        .eq('tienda', selectedStore)
+        .eq('status', 'CLOSED')
+        .order('closed_at', { ascending: false })
+        .limit(20);
+
+      if (error) throw error;
+
+      setClosedContainers(data ?? []);
+      setShowReprintModal(true);
+    } catch (err) {
+      console.error('[REPRINT] Error cargando contenedores cerrados:', err);
+      showToast('error', 'Error', 'No se pudieron cargar los contenedores cerrados');
+    } finally {
+      setLoadingReprint(false);
+    }
+  };
+
+  // ── Reimprimir contenedor ──
+  const handleReprint = async (containerId: string, containerCode: string, containerTienda: string) => {
+    setReprintingId(containerId);
+    try {
+      console.log('[REPRINT] Reimprimiendo contenedor:', { containerId, containerCode, containerTienda });
+
+      const result = await printContainerById(containerId, containerCode, containerTienda);
+
+      if (!result.success) {
+        showToast('error', 'Error al reimprimir', result.error || 'No se pudo generar la etiqueta');
+      } else {
+        showToast('success', 'Reimpreso', `Etiqueta de ${containerCode} enviada a impresión`);
+      }
+    } catch (err) {
+      console.error('[REPRINT] Error:', err);
+      showToast('error', 'Error', 'No se pudo reimprimir el contenedor');
+    } finally {
+      setReprintingId(null);
+    }
+  };
+
   return (
     <div className="space-y-4 md:space-y-6 max-w-2xl mx-auto md:max-w-none">
       {/* Header */}
@@ -629,12 +685,12 @@ export default function OperacionPage() {
               </div>
             )}
 
-            {/* ── Botón Iniciar Distribución — ARRIBA de las listas ── */}
-            <div className="mb-4">
+            {/* ── Botones de acción: Iniciar Distribución + Reimprimir ── */}
+            <div className="mb-4 flex gap-2">
               <button
                 onClick={handleStartDistribucion}
                 disabled={inventoryTotal === 0}
-                className="w-full py-3.5 bg-gradient-to-r from-teal-500 to-cyan-600 text-white rounded-xl font-semibold text-base hover:from-teal-600 hover:to-cyan-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap cursor-pointer flex items-center justify-center gap-2"
+                className="flex-1 py-3.5 bg-gradient-to-r from-teal-500 to-cyan-600 text-white rounded-xl font-semibold text-base hover:from-teal-600 hover:to-cyan-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap cursor-pointer flex items-center justify-center gap-2"
               >
                 <i className="ri-box-3-line text-lg"></i>
                 Iniciar Distribución
@@ -642,6 +698,22 @@ export default function OperacionPage() {
                   <span className="text-sm font-normal text-teal-100">— Tienda {selectedStore}</span>
                 )}
               </button>
+
+              {/* Botón Reimprimir - solo si hay tienda seleccionada */}
+              {selectedStore !== 'ALL' && (
+                <button
+                  onClick={loadClosedContainers}
+                  disabled={loadingReprint}
+                  className="px-4 py-3.5 bg-white border-2 border-gray-200 text-gray-700 rounded-xl font-semibold text-base hover:bg-gray-50 hover:border-gray-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap cursor-pointer flex items-center justify-center gap-2"
+                >
+                  {loadingReprint ? (
+                    <i className="ri-loader-4-line animate-spin text-lg"></i>
+                  ) : (
+                    <i className="ri-printer-line text-lg"></i>
+                  )}
+                  <span className="hidden sm:inline">Reimprimir</span>
+                </button>
+              )}
             </div>
 
             {/* ── Listas: Inventario + Pedidos ── */}
@@ -790,6 +862,81 @@ export default function OperacionPage() {
             handleUnlock();
           }}
         />
+      )}
+
+      {/* Modal Reimprimir */}
+      {showReprintModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Reimprimir Contenedores</h3>
+                <p className="text-sm text-gray-500 mt-0.5">Tienda {selectedStore} · Últimos 20 cerrados</p>
+              </div>
+              <button
+                onClick={() => setShowReprintModal(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+              >
+                <i className="ri-close-line text-xl text-gray-400"></i>
+              </button>
+            </div>
+
+            {/* Lista de contenedores */}
+            <div className="flex-1 overflow-y-auto p-6">
+              {closedContainers.length === 0 ? (
+                <div className="text-center py-12">
+                  <i className="ri-inbox-line text-5xl text-gray-300 mb-3"></i>
+                  <p className="text-sm text-gray-500">No hay contenedores cerrados para esta tienda</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {closedContainers.map((container) => (
+                    <div
+                      key={container.id}
+                      className="bg-gray-50 rounded-lg p-4 flex items-center justify-between hover:bg-gray-100 transition-colors"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-base font-bold text-gray-900 font-mono">{container.code}</span>
+                          <span className="text-xs font-medium text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full">
+                            Tienda {container.tienda}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          Cerrado: {new Date(container.closed_at).toLocaleDateString('es-ES', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleReprint(container.id, container.code, container.tienda)}
+                        disabled={reprintingId === container.id}
+                        className="px-4 py-2 bg-gradient-to-r from-teal-500 to-cyan-600 text-white rounded-lg font-semibold text-sm hover:from-teal-600 hover:to-cyan-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap cursor-pointer flex items-center gap-2"
+                      >
+                        {reprintingId === container.id ? (
+                          <>
+                            <i className="ri-loader-4-line animate-spin"></i>
+                            Imprimiendo...
+                          </>
+                        ) : (
+                          <>
+                            <i className="ri-printer-line"></i>
+                            Reimprimir
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

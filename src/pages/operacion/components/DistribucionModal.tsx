@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect } from 'react';
 import { supabase, Pallet, PalletInventory, ImportLine } from '../../../lib/supabase';
 import { getOrCreateOpenContainer, isContainerEditable } from '../../../lib/containerService';
@@ -6,6 +5,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { useToast } from '../../../components/base/Toast';
 import TiendaChangePopup from './TiendaChangePopup';
 import SobranteModal from './SobranteModal';
+import { printContainerById } from '../../../services/printing/containerPrint';
 
 export default function DistribucionModal({
   pallet,
@@ -646,7 +646,7 @@ export default function DistribucionModal({
         );
         const { data: cont } = await supabase
           .from('containers')
-          .select('id, code, status')
+          .select('id, code, tienda, status')
           .eq('id', continueContainerId)
           .maybeSingle();
 
@@ -656,14 +656,14 @@ export default function DistribucionModal({
           setSelectedTiendaToClose('');
           return;
         }
-        containerToClose = { id: cont.id, code: cont.code };
+        containerToClose = { id: cont.id, code: cont.code, tienda: cont.tienda };
       } else {
         const resolvedImportId = importId || pendingLines[0]?.import_id;
         if (!resolvedImportId) throw new Error('No se encontró el ID de importación');
 
         const { data: openContainer } = await supabase
           .from('containers')
-          .select('id, code')
+          .select('id, code, tienda')
           .eq('import_id', resolvedImportId)
           .eq('tienda', selectedTiendaToClose)
           .eq('status', 'OPEN')
@@ -690,6 +690,7 @@ export default function DistribucionModal({
         return;
       }
 
+      // ✅ Cerrar contenedor
       const { error: updateError } = await supabase
         .from('containers')
         .update({ status: 'CLOSED', closed_at: new Date().toISOString() })
@@ -714,6 +715,42 @@ export default function DistribucionModal({
         `Tienda: ${selectedTiendaToClose} · ${count} líneas`,
         6000
       );
+
+      // ✅ Imprimir automáticamente después del cierre exitoso
+      console.log('[PRINT_ON_CLOSE] Iniciando impresión automática...', {
+        containerId: containerToClose.id,
+        containerCode: containerToClose.code,
+        tienda: containerToClose.tienda
+      });
+
+      try {
+        const printResult = await printContainerById(
+          containerToClose.id,
+          containerToClose.code,
+          containerToClose.tienda
+        );
+
+        if (printResult.success) {
+          console.log('[PRINT_ON_CLOSE] ✅ Impresión completada exitosamente');
+        } else {
+          console.error('[PRINT_ON_CLOSE] ❌ Error en impresión:', printResult.error);
+          showToast(
+            'warning',
+            'Cerrado, pero no se pudo imprimir',
+            'Puedes reimprimir desde el módulo Contenedores',
+            5000
+          );
+        }
+      } catch (printError) {
+        console.error('[PRINT_ON_CLOSE] ❌ Excepción en impresión:', printError);
+        showToast(
+          'warning',
+          'Cerrado, pero no se pudo imprimir',
+          'Puedes reimprimir desde el módulo Contenedores',
+          5000
+        );
+      }
+
       setShowCloseModal(false);
       setSelectedTiendaToClose('');
       onComplete();

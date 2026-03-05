@@ -1,13 +1,48 @@
 import * as React from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase, Container } from '../../lib/supabase';
+import { printContainerById } from '../../services/printing/containerPrint';
 
 interface ContainerWithCamion extends Container {
   camion?: string;
+  pallets?: string[]; // Array de pallet_codes asociados
+}
+
+interface ContainerContentRow {
+  pallet_code: string;
+  sku: string;
+  descripcion: string;
+  qty: number;
 }
 
 const PAGE_SIZE = 10;
+
+/**
+ * Normaliza un string para búsqueda:
+ * - Trim y uppercase
+ * - Genera variantes con O→0 y 0→O para manejar confusiones comunes
+ */
+const normalize = (s: string | null | undefined): string[] => {
+  if (!s) return [''];
+  const base = s.trim().toUpperCase();
+  
+  // Generar variantes: original, con O→0, con 0→O
+  const variants = new Set<string>();
+  variants.add(base);
+  
+  // Si contiene O, agregar variante con 0
+  if (base.includes('O')) {
+    variants.add(base.replace(/O/g, '0'));
+  }
+  
+  // Si contiene 0, agregar variante con O
+  if (base.includes('0')) {
+    variants.add(base.replace(/0/g, 'O'));
+  }
+  
+  return Array.from(variants);
+};
 
 export default function ContenedoresPage() {
   const navigate = useNavigate();
@@ -15,6 +50,8 @@ export default function ContenedoresPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [reprintingId, setReprintingId] = useState<string | null>(null);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -27,7 +64,13 @@ export default function ContenedoresPage() {
     try {
       let query = supabase
         .from('containers')
-        .select('*')
+        .select(`
+          *,
+          container_lines(
+            pallet_id,
+            pallets(pallet_code)
+          )
+        `)
         .order('created_at', { ascending: false });
 
       if (filter !== 'all') query = query.eq('status', filter);
@@ -39,6 +82,17 @@ export default function ContenedoresPage() {
 
       for (const container of data || []) {
         try {
+          // Extraer pallets únicos
+          const palletCodes = new Set<string>();
+          if (container.container_lines && Array.isArray(container.container_lines)) {
+            container.container_lines.forEach((line: any) => {
+              if (line.pallets?.pallet_code) {
+                palletCodes.add(line.pallets.pallet_code);
+              }
+            });
+          }
+
+          // Obtener camión de la primera línea
           const { data: containerLine } = await supabase
             .from('container_lines')
             .select('source_import_line_id')
@@ -56,9 +110,17 @@ export default function ContenedoresPage() {
             camion = importLine?.camion ?? '';
           }
 
-          containersWithCamion.push({ ...container, camion });
+          containersWithCamion.push({ 
+            ...container, 
+            camion,
+            pallets: Array.from(palletCodes)
+          });
         } catch {
-          containersWithCamion.push({ ...container, camion: '' });
+          containersWithCamion.push({ 
+            ...container, 
+            camion: '',
+            pallets: []
+          });
         }
       }
 
@@ -70,11 +132,81 @@ export default function ContenedoresPage() {
     }
   };
 
+  /** Filtrar contenedores por búsqueda combinada: container.code + pallet_code */
+  const filteredContainers = useMemo(() => {
+    if (!searchTerm.trim()) return containers;
+
+    const queryVariants = normalize(searchTerm);
+    
+    console.log('[SEARCH]', { 
+      query: searchTerm, 
+      normalized: queryVariants 
+    });
+
+    return containers.filter((c) => {
+      // Normalizar container.code
+      const containerCodeVariants = normalize(c.code);
+      
+      // Buscar en container.code
+      const matchCode = queryVariants.some(qv => 
+        containerCodeVariants.some(cv => cv.includes(qv))
+      );
+      
+      // Buscar en pallets asociados
+      const matchPallet = c.pallets?.some((pallet) => {
+        const palletVariants = normalize(pallet);
+        return queryVariants.some(qv => 
+          palletVariants.some(pv => pv.includes(qv))
+        );
+      }) ?? false;
+
+      const match = matchCode || matchPallet;
+
+      // Log para diagnóstico (comentar después de verificar)
+      if (match) {
+        console.log('[SEARCH] Match:', {
+          code: c.code,
+          containerCodeVariants,
+          pallets: c.pallets,
+          matchCode,
+          matchPallet
+        });
+      }
+
+      return match;
+    });
+  }, [containers, searchTerm]);
+
   const handleContinueContainer = (e: React.MouseEvent, containerId: string) => {
     e.preventDefault();
     e.stopPropagation();
     console.log('🔄 Continuar contenedor:', containerId);
     navigate(`/operacion?containerId=${containerId}`);
+  };
+
+  /** Reimprimir etiqueta de contenedor CLOSED */
+  const handleReprint = async (e: React.MouseEvent, container: ContainerWithCamion) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (container.status !== 'CLOSED') return;
+
+    setReprintingId(container.id);
+
+    try {
+      console.log('🖨️ Reimprimiendo contenedor:', container.code);
+
+      const result = await printContainerById(container.id, container.code, container.tienda);
+
+      if (!result.success) {
+        throw new Error(result.error || 'Error al reimprimir');
+      }
+    } catch (err) {
+      console.error('❌ Error reimprimiendo:', err);
+      alert('Error al reimprimir la etiqueta del contenedor');
+    } finally {
+      setReprintingId(null);
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -98,8 +230,13 @@ export default function ContenedoresPage() {
     { value: 'DISPATCHED', label: 'Despachados' },
   ];
 
-  const totalPages = Math.max(1, Math.ceil(containers.length / PAGE_SIZE));
-  const paginated = containers.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(filteredContainers.length / PAGE_SIZE));
+  const paginated = filteredContainers.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  // Resetear página cuando cambia el filtro de búsqueda
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
 
   return (
     <div className="space-y-4 max-w-2xl mx-auto md:max-w-none">
@@ -123,16 +260,53 @@ export default function ContenedoresPage() {
           </div>
         </div>
 
+        {/* Barra de búsqueda tipo blur */}
+        <div className="p-3 md:p-4 border-b border-gray-100">
+          <div 
+            className="relative rounded-xl overflow-hidden"
+            style={{
+              background: 'rgba(255, 255, 255, 0.7)',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              border: '1px solid rgba(209, 213, 219, 0.3)'
+            }}
+          >
+            <i className="ri-search-line absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-lg"></i>
+            <input
+              type="text"
+              placeholder="Buscar por número de pallet…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-11 pr-10 py-3 bg-transparent text-sm focus:outline-none placeholder:text-gray-400"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 cursor-pointer rounded-full hover:bg-gray-100 transition-colors"
+              >
+                <i className="ri-close-line text-lg"></i>
+              </button>
+            )}
+          </div>
+          {searchTerm && (
+            <p className="text-xs text-gray-500 mt-2">
+              {filteredContainers.length} contenedor{filteredContainers.length !== 1 ? 'es' : ''} encontrado{filteredContainers.length !== 1 ? 's' : ''}
+            </p>
+          )}
+        </div>
+
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-teal-500"></div>
           </div>
-        ) : containers.length === 0 ? (
+        ) : filteredContainers.length === 0 ? (
           <div className="text-center py-16">
             <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <i className="ri-inbox-line text-3xl text-gray-300"></i>
             </div>
-            <p className="text-sm text-gray-500">No hay contenedores disponibles</p>
+            <p className="text-sm text-gray-500">
+              {searchTerm ? 'No se encontraron contenedores con ese pallet' : 'No hay contenedores disponibles'}
+            </p>
           </div>
         ) : (
           <>
@@ -196,6 +370,26 @@ export default function ContenedoresPage() {
                         <span className="hidden sm:inline">Continuar</span>
                       </button>
                     )}
+                    {c.status === 'CLOSED' && (
+                      <button
+                        onClick={(e) => handleReprint(e, c)}
+                        disabled={reprintingId === c.id}
+                        className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-200 transition-colors whitespace-nowrap cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Reimprimir etiqueta"
+                      >
+                        {reprintingId === c.id ? (
+                          <>
+                            <div className="animate-spin rounded-full h-3 w-3 border-2 border-gray-400 border-t-transparent"></div>
+                            <span className="hidden sm:inline">Reimprimiendo…</span>
+                          </>
+                        ) : (
+                          <>
+                            <i className="ri-printer-line"></i>
+                            <span className="hidden sm:inline">Reimprimir</span>
+                          </>
+                        )}
+                      </button>
+                    )}
                     <Link
                       to={`/contenedores/${c.id}`}
                       className="w-8 h-8 flex items-center justify-center flex-shrink-0 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
@@ -211,7 +405,7 @@ export default function ContenedoresPage() {
             {totalPages > 1 && (
               <div className="flex items-center justify-between px-4 md:px-5 py-3 border-t border-gray-100">
                 <p className="text-xs text-gray-400">
-                  {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, containers.length)} de {containers.length}
+                  {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filteredContainers.length)} de {filteredContainers.length}
                 </p>
                 <div className="flex items-center gap-1">
                   <button
