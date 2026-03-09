@@ -45,13 +45,16 @@ const defaultStats: DashboardStats = {
   progressPercent: 0,
 };
 
-export function useDashboardStats(refreshInterval = 10000) {
+export function useDashboardStats(refreshInterval = 10000, importId: string | null = null) {
   const [stats, setStats] = useState<DashboardStats>(defaultStats);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
 
   const fetchStats = useCallback(async () => {
     try {
+      // Si hay un importId seleccionado, filtrar por esa carga
+      const importFilter = importId ? { import_id: importId } : {};
+
       const [
         activeImports,
         doneImports,
@@ -70,61 +73,256 @@ export function useDashboardStats(refreshInterval = 10000) {
         uniqueCamiones,
         totalUnitsData,
       ] = await Promise.all([
-        supabase
-          .from('imports')
-          .select('id', { count: 'exact', head: true })
-          .in('status', ['DRAFT', 'IN_PROGRESS']),
-        supabase
-          .from('imports')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'DONE'),
-        supabase
-          .from('import_lines')
-          .select('id', { count: 'exact', head: true }),
-        supabase
-          .from('import_lines')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'PENDING'),
-        supabase
-          .from('import_lines')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'PARTIAL'),
-        supabase
-          .from('import_lines')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'DONE'),
-        supabase
-          .from('pallets')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'OPEN'),
-        supabase.from('pallets').select('id', { count: 'exact', head: true }),
-        supabase
-          .from('containers')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'OPEN'),
-        supabase
-          .from('containers')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'CLOSED'),
-        supabase
-          .from('containers')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'DISPATCHED'),
-        supabase
-          .from('scan_events')
-          .select('id', { count: 'exact', head: true }),
-        supabase
-          .from('import_lines')
-          .select('sku'),
-        supabase
-          .from('import_lines')
-          .select('tienda'),
-        supabase
-          .from('import_lines')
-          .select('camion'),
-        supabase
-          .from('import_lines')
-          .select('qty_to_send, qty_confirmed'),
+        // Imports activos
+        importId
+          ? supabase
+              .from('imports')
+              .select('id', { count: 'exact', head: true })
+              .eq('id', importId)
+              .in('status', ['DRAFT', 'IN_PROGRESS'])
+          : supabase
+              .from('imports')
+              .select('id', { count: 'exact', head: true })
+              .in('status', ['DRAFT', 'IN_PROGRESS']),
+        
+        // Imports completados
+        importId
+          ? supabase
+              .from('imports')
+              .select('id', { count: 'exact', head: true })
+              .eq('id', importId)
+              .eq('status', 'DONE')
+          : supabase
+              .from('imports')
+              .select('id', { count: 'exact', head: true })
+              .eq('status', 'DONE'),
+        
+        // Total de líneas
+        importId
+          ? supabase
+              .from('import_lines')
+              .select('id', { count: 'exact', head: true })
+              .eq('import_id', importId)
+          : supabase
+              .from('import_lines')
+              .select('id', { count: 'exact', head: true }),
+        
+        // Líneas pendientes
+        importId
+          ? supabase
+              .from('import_lines')
+              .select('id', { count: 'exact', head: true })
+              .eq('import_id', importId)
+              .eq('status', 'PENDING')
+          : supabase
+              .from('import_lines')
+              .select('id', { count: 'exact', head: true })
+              .eq('status', 'PENDING'),
+        
+        // Líneas parciales
+        importId
+          ? supabase
+              .from('import_lines')
+              .select('id', { count: 'exact', head: true })
+              .eq('import_id', importId)
+              .eq('status', 'PARTIAL')
+          : supabase
+              .from('import_lines')
+              .select('id', { count: 'exact', head: true })
+              .eq('status', 'PARTIAL'),
+        
+        // Líneas completadas
+        importId
+          ? supabase
+              .from('import_lines')
+              .select('id', { count: 'exact', head: true })
+              .eq('import_id', importId)
+              .eq('status', 'DONE')
+          : supabase
+              .from('import_lines')
+              .select('id', { count: 'exact', head: true })
+              .eq('status', 'DONE'),
+        
+        // Pallets abiertos (filtrar por pallet_codes de la carga si aplica)
+        importId
+          ? (async () => {
+              const { data: lines } = await supabase
+                .from('import_lines')
+                .select('pallet_code')
+                .eq('import_id', importId);
+              
+              if (!lines || lines.length === 0) return { count: 0 };
+              
+              const palletCodes = [...new Set(lines.map(l => l.pallet_code).filter(Boolean))];
+              
+              return supabase
+                .from('pallets')
+                .select('id', { count: 'exact', head: true })
+                .in('pallet_code', palletCodes)
+                .eq('status', 'OPEN');
+            })()
+          : supabase
+              .from('pallets')
+              .select('id', { count: 'exact', head: true })
+              .eq('status', 'OPEN'),
+        
+        // Total pallets
+        importId
+          ? (async () => {
+              const { data: lines } = await supabase
+                .from('import_lines')
+                .select('pallet_code')
+                .eq('import_id', importId);
+              
+              if (!lines || lines.length === 0) return { count: 0 };
+              
+              const palletCodes = [...new Set(lines.map(l => l.pallet_code).filter(Boolean))];
+              
+              return supabase
+                .from('pallets')
+                .select('id', { count: 'exact', head: true })
+                .in('pallet_code', palletCodes);
+            })()
+          : supabase.from('pallets').select('id', { count: 'exact', head: true }),
+        
+        // Contenedores abiertos (filtrar por tiendas de la carga si aplica)
+        importId
+          ? (async () => {
+              const { data: lines } = await supabase
+                .from('import_lines')
+                .select('tienda')
+                .eq('import_id', importId);
+              
+              if (!lines || lines.length === 0) return { count: 0 };
+              
+              const tiendas = [...new Set(lines.map(l => l.tienda).filter(Boolean))];
+              
+              return supabase
+                .from('containers')
+                .select('id', { count: 'exact', head: true })
+                .in('tienda', tiendas)
+                .eq('status', 'OPEN');
+            })()
+          : supabase
+              .from('containers')
+              .select('id', { count: 'exact', head: true })
+              .eq('status', 'OPEN'),
+        
+        // Contenedores cerrados
+        importId
+          ? (async () => {
+              const { data: lines } = await supabase
+                .from('import_lines')
+                .select('tienda')
+                .eq('import_id', importId);
+              
+              if (!lines || lines.length === 0) return { count: 0 };
+              
+              const tiendas = [...new Set(lines.map(l => l.tienda).filter(Boolean))];
+              
+              return supabase
+                .from('containers')
+                .select('id', { count: 'exact', head: true })
+                .in('tienda', tiendas)
+                .eq('status', 'CLOSED');
+            })()
+          : supabase
+              .from('containers')
+              .select('id', { count: 'exact', head: true })
+              .eq('status', 'CLOSED'),
+        
+        // Contenedores despachados
+        importId
+          ? (async () => {
+              const { data: lines } = await supabase
+                .from('import_lines')
+                .select('tienda')
+                .eq('import_id', importId);
+              
+              if (!lines || lines.length === 0) return { count: 0 };
+              
+              const tiendas = [...new Set(lines.map(l => l.tienda).filter(Boolean))];
+              
+              return supabase
+                .from('containers')
+                .select('id', { count: 'exact', head: true })
+                .in('tienda', tiendas)
+                .eq('status', 'DISPATCHED');
+            })()
+          : supabase
+              .from('containers')
+              .select('id', { count: 'exact', head: true })
+              .eq('status', 'DISPATCHED'),
+        
+        // Total eventos (filtrar por pallets de la carga si aplica)
+        importId
+          ? (async () => {
+              const { data: lines } = await supabase
+                .from('import_lines')
+                .select('pallet_code')
+                .eq('import_id', importId);
+              
+              if (!lines || lines.length === 0) return { count: 0 };
+              
+              const palletCodes = [...new Set(lines.map(l => l.pallet_code).filter(Boolean))];
+              
+              const { data: pallets } = await supabase
+                .from('pallets')
+                .select('id')
+                .in('pallet_code', palletCodes);
+              
+              if (!pallets || pallets.length === 0) return { count: 0 };
+              
+              const palletIds = pallets.map(p => p.id);
+              
+              return supabase
+                .from('scan_events')
+                .select('id', { count: 'exact', head: true })
+                .in('pallet_id', palletIds);
+            })()
+          : supabase
+              .from('scan_events')
+              .select('id', { count: 'exact', head: true }),
+        
+        // SKUs únicos
+        importId
+          ? supabase
+              .from('import_lines')
+              .select('sku')
+              .eq('import_id', importId)
+          : supabase
+              .from('import_lines')
+              .select('sku'),
+        
+        // Tiendas únicas
+        importId
+          ? supabase
+              .from('import_lines')
+              .select('tienda')
+              .eq('import_id', importId)
+          : supabase
+              .from('import_lines')
+              .select('tienda'),
+        
+        // Camiones únicos
+        importId
+          ? supabase
+              .from('import_lines')
+              .select('camion')
+              .eq('import_id', importId)
+          : supabase
+              .from('import_lines')
+              .select('camion'),
+        
+        // Total unidades
+        importId
+          ? supabase
+              .from('import_lines')
+              .select('qty_to_send, qty_confirmed')
+              .eq('import_id', importId)
+          : supabase
+              .from('import_lines')
+              .select('qty_to_send, qty_confirmed'),
       ]);
 
       const tl = totalLines?.count ?? 0;
@@ -173,7 +371,7 @@ export function useDashboardStats(refreshInterval = 10000) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [importId]);
 
   useEffect(() => {
     fetchStats();

@@ -16,6 +16,13 @@ interface ContainerContentRow {
   qty: number;
 }
 
+interface ImportOption {
+  id: string;
+  file_name: string;
+  status: string;
+  created_at: string;
+}
+
 const PAGE_SIZE = 10;
 
 /**
@@ -52,13 +59,42 @@ export default function ContenedoresPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [reprintingId, setReprintingId] = useState<string | null>(null);
+  
+  // Estados para el filtro de carga
+  const [selectedImportId, setSelectedImportId] = useState<string | null>(null);
+  const [imports, setImports] = useState<ImportOption[]>([]);
+  const [loadingImports, setLoadingImports] = useState(true);
+  const [showImportDropdown, setShowImportDropdown] = useState(false);
+
+  // Cargar lista de importaciones
+  useEffect(() => {
+    fetchImports();
+  }, []);
+
+  const fetchImports = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('imports')
+        .select('id, file_name, status, created_at')
+        .neq('status', 'CANCELLED')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      setImports(data || []);
+    } catch (error) {
+      console.error('Error cargando importaciones:', error);
+    } finally {
+      setLoadingImports(false);
+    }
+  };
 
   useEffect(() => {
     setCurrentPage(1);
     loadContainers();
     const interval = setInterval(loadContainers, 15000);
     return () => clearInterval(interval);
-  }, [filter]);
+  }, [filter, selectedImportId]);
 
   const loadContainers = async () => {
     try {
@@ -73,7 +109,11 @@ export default function ContenedoresPage() {
         `)
         .order('created_at', { ascending: false });
 
+      // Filtro por estado
       if (filter !== 'all') query = query.eq('status', filter);
+      
+      // Filtro por carga/importación
+      if (selectedImportId) query = query.eq('import_id', selectedImportId);
 
       const { data, error } = await query;
       if (error) throw error;
@@ -223,6 +263,15 @@ export default function ContenedoresPage() {
     );
   };
 
+  const getStatusBadgeForImport = (status: string) => {
+    const statusMap: Record<string, { label: string; color: string }> = {
+      DRAFT: { label: 'Borrador', color: 'bg-gray-100 text-gray-600' },
+      IN_PROGRESS: { label: 'En Progreso', color: 'bg-teal-100 text-teal-700' },
+      DONE: { label: 'Completado', color: 'bg-emerald-100 text-emerald-700' },
+    };
+    return statusMap[status] || { label: status, color: 'bg-gray-100 text-gray-600' };
+  };
+
   const filters = [
     { value: 'all', label: 'Todos' },
     { value: 'OPEN', label: 'Abiertos' },
@@ -237,6 +286,11 @@ export default function ContenedoresPage() {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm]);
+
+  const selectedImport = imports.find((imp) => imp.id === selectedImportId);
+  const displayLabel = selectedImportId && selectedImport
+    ? selectedImport.file_name
+    : 'Todas las cargas';
 
   return (
     <div className="space-y-4 max-w-2xl mx-auto md:max-w-none">
@@ -258,6 +312,115 @@ export default function ContenedoresPage() {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Selector de carga */}
+        <div className="p-3 md:p-4 border-b border-gray-100">
+          <div className="relative">
+            <button
+              onClick={() => setShowImportDropdown(!showImportDropdown)}
+              className="flex items-center space-x-2 px-4 py-2.5 bg-white border border-gray-200 rounded-lg hover:border-teal-300 transition-colors cursor-pointer whitespace-nowrap w-full md:w-auto"
+            >
+              <i className="ri-file-list-3-line text-teal-600"></i>
+              <span className="text-sm font-medium text-gray-700 max-w-[200px] truncate">
+                {displayLabel}
+              </span>
+              <i className={`ri-arrow-down-s-line text-gray-400 transition-transform ml-auto ${showImportDropdown ? 'rotate-180' : ''}`}></i>
+            </button>
+
+            {showImportDropdown && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowImportDropdown(false)}
+                ></div>
+                <div className="absolute top-full left-0 mt-2 w-full md:w-[400px] bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-[400px] overflow-y-auto">
+                  {/* Opción: Todas las cargas */}
+                  <button
+                    onClick={() => {
+                      setSelectedImportId(null);
+                      setShowImportDropdown(false);
+                    }}
+                    className={`w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors cursor-pointer border-b border-gray-100 ${
+                      !selectedImportId ? 'bg-teal-50' : ''
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div className="w-8 h-8 bg-teal-100 text-teal-600 rounded-lg flex items-center justify-center">
+                        <i className="ri-stack-line"></i>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-gray-900">Todas las cargas</p>
+                        <p className="text-xs text-gray-500">Ver todos los contenedores</p>
+                      </div>
+                      {!selectedImportId && (
+                        <i className="ri-check-line text-teal-600"></i>
+                      )}
+                    </div>
+                  </button>
+
+                  {/* Lista de importaciones */}
+                  {loadingImports ? (
+                    <div className="p-4 text-center">
+                      <div className="animate-spin w-6 h-6 border-2 border-teal-600 border-t-transparent rounded-full mx-auto"></div>
+                    </div>
+                  ) : imports.length === 0 ? (
+                    <div className="p-4 text-center text-sm text-gray-400">
+                      No hay cargas disponibles
+                    </div>
+                  ) : (
+                    imports.map((imp) => {
+                      const badge = getStatusBadgeForImport(imp.status);
+                      const date = new Date(imp.created_at);
+                      const dateStr = date.toLocaleDateString('es-ES', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                      });
+
+                      return (
+                        <button
+                          key={imp.id}
+                          onClick={() => {
+                            setSelectedImportId(imp.id);
+                            setShowImportDropdown(false);
+                          }}
+                          className={`w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors cursor-pointer border-b border-gray-100 last:border-b-0 ${
+                            selectedImportId === imp.id ? 'bg-teal-50' : ''
+                          }`}
+                        >
+                          <div className="flex items-start space-x-3">
+                            <div className="w-8 h-8 bg-sky-100 text-sky-600 rounded-lg flex items-center justify-center mt-0.5">
+                              <i className="ri-file-text-line"></i>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-900 truncate">
+                                {imp.file_name}
+                              </p>
+                              <div className="flex items-center space-x-2 mt-1">
+                                <span className={`text-xs px-2 py-0.5 rounded-full ${badge.color}`}>
+                                  {badge.label}
+                                </span>
+                                <span className="text-xs text-gray-400">{dateStr}</span>
+                              </div>
+                            </div>
+                            {selectedImportId === imp.id && (
+                              <i className="ri-check-line text-teal-600 mt-1"></i>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+          {selectedImportId && selectedImport && (
+            <p className="text-xs text-gray-500 mt-2">
+              Filtrando por: <span className="font-medium text-gray-700">{selectedImport.file_name}</span>
+            </p>
+          )}
         </div>
 
         {/* Barra de búsqueda tipo blur */}

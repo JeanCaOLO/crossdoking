@@ -79,84 +79,227 @@ export default function ReverseLineModal({ lineId, onClose, onSuccess }: Props) 
     setLoading(true);
     setError('');
 
+    console.log('[DIST_REVERSE] 🔄 Iniciando reversión:', {
+      container_line_id: lineDetails.id,
+      container_id: lineDetails.container_id,
+      pallet_id: lineDetails.pallet_id,
+      pallet_code: lineDetails.pallet_code,
+      sku: lineDetails.sku,
+      tienda: lineDetails.tienda,
+      qty: lineDetails.qty,
+      import_line_id: lineDetails.source_import_line_id,
+      user_id: user.id,
+      timestamp: new Date().toISOString()
+    });
+
     try {
-      // 1. Verificar que el contenedor NO esté DISPATCHED
-      const { data: container } = await supabase
+      // ✅ VALIDACIÓN 1: Verificar que el contenedor NO esté DISPATCHED
+      console.log('[DIST_REVERSE] 📦 Verificando estado del contenedor...');
+      const { data: container, error: containerError } = await supabase
         .from('containers')
-        .select('status')
+        .select('status, code')
         .eq('id', lineDetails.container_id)
         .maybeSingle();
 
+      if (containerError) {
+        console.error('[DIST_REVERSE] ❌ Error consultando contenedor:', containerError);
+        throw containerError;
+      }
+
       if (!container) {
+        console.error('[DIST_REVERSE] ❌ Contenedor no encontrado:', lineDetails.container_id);
         throw new Error('Contenedor no encontrado');
       }
 
       if (container.status === 'DISPATCHED') {
+        console.error('[DIST_REVERSE] ❌ BLOQUEADO: Contenedor despachado', {
+          container_id: lineDetails.container_id,
+          container_code: container.code,
+          status: container.status
+        });
         throw new Error('No se pueden reversar líneas de contenedores despachados');
       }
 
-      // 2. Devolver cantidad al inventario del pallet
-      const { data: currentInv } = await supabase
+      console.log('[DIST_REVERSE] ✅ Contenedor válido para reverso:', {
+        container_code: container.code,
+        status: container.status
+      });
+
+      // ✅ VALIDACIÓN 2: Verificar existencia de inventario del pallet
+      console.log('[DIST_REVERSE] 📊 Verificando inventario del pallet...');
+      const { data: currentInv, error: invFetchError } = await supabase
         .from('pallet_inventory')
-        .select('qty_available')
+        .select('id, qty_available')
         .eq('pallet_id', lineDetails.pallet_id)
         .eq('sku', lineDetails.sku)
         .maybeSingle();
 
+      if (invFetchError) {
+        console.error('[DIST_REVERSE] ❌ Error consultando inventario:', invFetchError);
+        throw invFetchError;
+      }
+
       if (!currentInv) {
+        console.error('[DIST_REVERSE] ❌ Inventario del pallet no encontrado:', {
+          pallet_id: lineDetails.pallet_id,
+          sku: lineDetails.sku
+        });
         throw new Error('Inventario del pallet no encontrado');
       }
 
+      console.log('[DIST_REVERSE] ✅ Inventario encontrado:', {
+        inventory_id: currentInv.id,
+        current_qty_available: currentInv.qty_available,
+        qty_to_return: lineDetails.qty,
+        new_qty_available: currentInv.qty_available + lineDetails.qty
+      });
+
+      // ✅ PASO 1: Devolver cantidad al inventario del pallet
+      console.log('[DIST_REVERSE] 📦 Devolviendo cantidad al pallet...');
+      const newQtyAvailable = currentInv.qty_available + lineDetails.qty;
       const { error: invError } = await supabase
         .from('pallet_inventory')
-        .update({ qty_available: currentInv.qty_available + lineDetails.qty })
-        .eq('pallet_id', lineDetails.pallet_id)
-        .eq('sku', lineDetails.sku);
+        .update({ qty_available: newQtyAvailable })
+        .eq('id', currentInv.id);
 
-      if (invError) throw invError;
+      if (invError) {
+        console.error('[DIST_REVERSE] ❌ Error actualizando inventario:', invError);
+        throw invError;
+      }
 
-      // 3. Restar cantidad confirmada de la línea de importación
-      const { data: importLine } = await supabase
+      console.log('[DIST_REVERSE] ✅ Inventario actualizado:', {
+        inventory_id: currentInv.id,
+        old_qty: currentInv.qty_available,
+        new_qty: newQtyAvailable
+      });
+
+      // ✅ VALIDACIÓN 3: Verificar existencia de línea de importación
+      console.log('[DIST_REVERSE] 📋 Verificando línea de importación...');
+      const { data: importLine, error: importFetchError } = await supabase
         .from('import_lines')
-        .select('qty_confirmed, qty_to_send')
+        .select('id, qty_confirmed, qty_to_send, status')
         .eq('id', lineDetails.source_import_line_id)
         .maybeSingle();
 
+      if (importFetchError) {
+        console.error('[DIST_REVERSE] ❌ Error consultando import_lines:', importFetchError);
+        throw importFetchError;
+      }
+
       if (!importLine) {
+        console.error('[DIST_REVERSE] ❌ Línea de importación no encontrada:', lineDetails.source_import_line_id);
         throw new Error('Línea de importación no encontrada');
       }
 
+      console.log('[DIST_REVERSE] ✅ Import line encontrada:', {
+        import_line_id: importLine.id,
+        current_qty_confirmed: importLine.qty_confirmed,
+        qty_to_send: importLine.qty_to_send,
+        current_status: importLine.status
+      });
+
+      // ✅ PASO 2: Restar cantidad confirmada y recalcular estado
       const newConfirmed = Math.max(0, importLine.qty_confirmed - lineDetails.qty);
-      const newStatus = newConfirmed === 0 ? 'PENDING' : newConfirmed >= importLine.qty_to_send ? 'DONE' : 'PARTIAL';
+      let newStatus: string;
+      
+      if (newConfirmed === 0) {
+        newStatus = 'PENDING';
+      } else if (newConfirmed >= importLine.qty_to_send) {
+        newStatus = 'DONE';
+      } else {
+        newStatus = 'PARTIAL';
+      }
+
+      console.log('[DIST_REVERSE] 📋 Calculando nuevo estado de import_lines:', {
+        old_confirmed: importLine.qty_confirmed,
+        qty_to_reverse: lineDetails.qty,
+        new_confirmed: newConfirmed,
+        qty_to_send: importLine.qty_to_send,
+        old_status: importLine.status,
+        new_status: newStatus
+      });
+
+      const updatePayload: any = {
+        qty_confirmed: newConfirmed,
+        status: newStatus,
+      };
+
+      // Si el nuevo estado no es DONE, limpiar campos de finalización
+      if (newStatus !== 'DONE') {
+        updatePayload.done_at = null;
+        updatePayload.done_by = null;
+        console.log('[DIST_REVERSE] 🔄 Limpiando campos done_at y done_by (status != DONE)');
+      }
 
       const { error: lineError } = await supabase
         .from('import_lines')
-        .update({
-          qty_confirmed: newConfirmed,
-          status: newStatus,
-          ...(newStatus !== 'DONE' ? { done_at: null, done_by: null } : {}),
-        })
+        .update(updatePayload)
         .eq('id', lineDetails.source_import_line_id);
 
-      if (lineError) throw lineError;
+      if (lineError) {
+        console.error('[DIST_REVERSE] ❌ Error actualizando import_lines:', lineError);
+        throw lineError;
+      }
 
-      // 4. Eliminar la línea del contenedor
+      console.log('[DIST_REVERSE] ✅ Import line actualizada:', {
+        import_line_id: lineDetails.source_import_line_id,
+        new_confirmed: newConfirmed,
+        new_status: newStatus
+      });
+
+      // ✅ PASO 3: Eliminar la línea del contenedor
+      console.log('[DIST_REVERSE] 🗑️ Eliminando línea del contenedor...');
       const { error: deleteError } = await supabase
         .from('container_lines')
         .delete()
         .eq('id', lineDetails.id);
 
-      if (deleteError) throw deleteError;
+      if (deleteError) {
+        console.error('[DIST_REVERSE] ❌ Error eliminando container_line:', deleteError);
+        throw deleteError;
+      }
 
-      // 5. Registrar evento de reversión
-      await supabase.from('scan_events').insert({
+      console.log('[DIST_REVERSE] ✅ Container line eliminada:', {
+        container_line_id: lineDetails.id
+      });
+
+      // ✅ PASO 4: Registrar evento de reversión
+      console.log('[DIST_REVERSE] 📝 Registrando evento de reversión...');
+      const { error: eventError } = await supabase.from('scan_events').insert({
         pallet_id: lineDetails.pallet_id,
         event_type: 'REVERSE',
         sku: lineDetails.sku,
         tienda: lineDetails.tienda,
         qty: lineDetails.qty,
         user_id: user.id,
-        notes: `Reversión de línea de contenedor`,
+        notes: JSON.stringify({
+          container_id: lineDetails.container_id,
+          container_line_id: lineDetails.id,
+          import_line_id: lineDetails.source_import_line_id,
+          old_confirmed: importLine.qty_confirmed,
+          new_confirmed: newConfirmed,
+          old_status: importLine.status,
+          new_status: newStatus,
+          old_inventory: currentInv.qty_available,
+          new_inventory: newQtyAvailable
+        }),
+      });
+
+      if (eventError) {
+        console.warn('[DIST_REVERSE] ⚠️ Error registrando scan_event (no crítico):', eventError);
+      } else {
+        console.log('[DIST_REVERSE] ✅ Evento registrado en scan_events');
+      }
+
+      console.log('[DIST_REVERSE] ✅ REVERSIÓN COMPLETADA EXITOSAMENTE:', {
+        container_line_id: lineDetails.id,
+        pallet_code: lineDetails.pallet_code,
+        sku: lineDetails.sku,
+        tienda: lineDetails.tienda,
+        qty_reversed: lineDetails.qty,
+        inventory_restored: newQtyAvailable,
+        import_line_new_status: newStatus,
+        import_line_new_confirmed: newConfirmed
       });
 
       showToast(
@@ -168,7 +311,15 @@ export default function ReverseLineModal({ lineId, onClose, onSuccess }: Props) 
       onSuccess();
       onClose();
     } catch (err: any) {
-      console.error('Error reversando línea:', err);
+      console.error('[DIST_REVERSE] ❌ ERROR EN REVERSIÓN:', {
+        error: err,
+        message: err instanceof Error ? err.message : 'Error desconocido',
+        container_line_id: lineDetails.id,
+        pallet_id: lineDetails.pallet_id,
+        sku: lineDetails.sku,
+        tienda: lineDetails.tienda,
+        qty: lineDetails.qty
+      });
       setError(err.message || 'Error al reversar la línea');
       showToast('error', 'Error', err.message || 'No se pudo reversar la línea');
     } finally {

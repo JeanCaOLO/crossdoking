@@ -123,31 +123,17 @@ export default function ContenedorDetallePage() {
     }
   };
 
-  /** Build rows for the table: group by pallet_code + sku and sum quantities */
+  /** Build rows for the table: NO GROUPING - each container_line is a separate row */
   const tableRows: ContainerContentRow[] = useMemo(() => {
-    const grouped = new Map<string, ContainerContentRow>();
-
-    lines.forEach((line) => {
-      const palletCode = line.pallets?.pallet_code ?? '—';
-      const key = `${palletCode}|${line.sku}`;
-
-      if (grouped.has(key)) {
-        const existing = grouped.get(key)!;
-        existing.qty += Number(line.qty) || 0;
-      } else {
-        grouped.set(key, {
-          id: line.id,
-          pallet_code: palletCode,
-          ubicacion: line.pallets?.ubicacion ?? '',
-          sku: line.sku,
-          descripcion: line.import_lines?.descripcion ?? '',
-          barcode: line.import_lines?.barcode ?? '',
-          qty: Number(line.qty) || 0,
-        });
-      }
-    });
-
-    return Array.from(grouped.values());
+    return lines.map((line) => ({
+      id: line.id,
+      pallet_code: line.pallets?.pallet_code ?? '—',
+      ubicacion: line.pallets?.ubicacion ?? '',
+      sku: line.sku,
+      descripcion: line.import_lines?.descripcion ?? '',
+      barcode: line.import_lines?.barcode ?? '',
+      qty: Number(line.qty) || 0,
+    }));
   }, [lines]);
 
   /** Filter rows by search term */

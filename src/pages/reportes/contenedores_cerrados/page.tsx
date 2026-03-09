@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useToast } from '../../../components/base/Toast';
 import * as XLSX from 'xlsx';
-import ClosedContainersFilters, { CCFilterValues } from './components/ClosedContainersFilters';
+import ClosedContainersFilters, { CCFilterValues, ImportOption } from './components/ClosedContainersFilters';
 import ClosedContainersTable, { ClosedContainerRow } from './components/ClosedContainersTable';
 
 const PAGE_SIZE = 25;
@@ -60,16 +60,19 @@ export default function ContenedoresCerradosPage() {
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [tiendas, setTiendas] = useState<string[]>([]);
+  const [imports, setImports] = useState<ImportOption[]>([]);
+  const [loadingImports, setLoadingImports] = useState(true);
   const [filters, setFilters] = useState<CCFilterValues>({
     status: 'all',
     tienda: 'all',
     dateFrom: '',
     dateTo: '',
     searchTerm: '',
+    importId: 'all',
   });
 
   /* ------------------------------------------------------------------ */
-  /*  Load distinct tiendas for dropdown                                */
+  /*  Load distinct tiendas + importaciones                             */
   /* ------------------------------------------------------------------ */
   useEffect(() => {
     (async () => {
@@ -94,54 +97,59 @@ export default function ContenedoresCerradosPage() {
         console.error('[CC] Error loading tiendas:', err);
       }
     })();
+
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('imports')
+          .select('id, file_name, status, created_at')
+          .neq('status', 'CANCELLED')
+          .order('created_at', { ascending: false });
+
+        setImports(data || []);
+      } catch (err) {
+        console.error('[CC] Error loading imports:', err);
+      } finally {
+        setLoadingImports(false);
+      }
+    })();
   }, []);
 
   /* ------------------------------------------------------------------ */
-  /*  Load data: query containers con métricas agregadas                */
+  /*  Load data                                                         */
   /* ------------------------------------------------------------------ */
   useEffect(() => {
     loadData();
   }, [page, filters]);
 
+  const applyFilters = (query: any) => {
+    if (filters.status === 'all') {
+      query = query.in('status', ['CLOSED', 'DISPATCHED']);
+    } else {
+      query = query.eq('status', filters.status);
+    }
+    if (filters.tienda !== 'all') query = query.eq('tienda', filters.tienda);
+    if (filters.dateFrom) query = query.gte('closed_at', `${filters.dateFrom}T00:00:00`);
+    if (filters.dateTo) query = query.lte('closed_at', `${filters.dateTo}T23:59:59`);
+    if (filters.searchTerm) query = query.ilike('code', `%${filters.searchTerm.trim()}%`);
+    if (filters.importId && filters.importId !== 'all') query = query.eq('import_id', filters.importId);
+    return query;
+  };
+
   const loadData = async () => {
     setLoading(true);
     try {
-      // ✅ PASO 1: Obtener IDs de contenedores filtrados y paginados
       let baseQuery = supabase
         .from('containers')
         .select('id, code, status, tienda, type, created_at, closed_at, dispatched_at', { count: 'exact' });
 
-      // Aplicar filtros
-      if (filters.status === 'all') {
-        baseQuery = baseQuery.in('status', ['CLOSED', 'DISPATCHED']);
-      } else {
-        baseQuery = baseQuery.eq('status', filters.status);
-      }
-
-      if (filters.tienda !== 'all') {
-        baseQuery = baseQuery.eq('tienda', filters.tienda);
-      }
-
-      if (filters.dateFrom) {
-        baseQuery = baseQuery.gte('closed_at', `${filters.dateFrom}T00:00:00`);
-      }
-      if (filters.dateTo) {
-        baseQuery = baseQuery.lte('closed_at', `${filters.dateTo}T23:59:59`);
-      }
-
-      if (filters.searchTerm) {
-        const term = filters.searchTerm.trim();
-        baseQuery = baseQuery.ilike('code', `%${term}%`);
-      }
-
-      // Orden y paginación
+      baseQuery = applyFilters(baseQuery);
       baseQuery = baseQuery
         .order('closed_at', { ascending: false, nullsFirst: false })
         .order('code', { ascending: true });
 
       const from = (page - 1) * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
-      baseQuery = baseQuery.range(from, to);
+      baseQuery = baseQuery.range(from, from + PAGE_SIZE - 1);
 
       const { data: containers, error: containerError, count } = await baseQuery;
       if (containerError) throw containerError;
@@ -154,7 +162,6 @@ export default function ContenedoresCerradosPage() {
         return;
       }
 
-      // ✅ PASO 2: Obtener métricas agregadas para estos contenedores
       const containerIds = containers.map((c: any) => c.id);
 
       const { data: linesData, error: linesError } = await supabase
@@ -164,21 +171,16 @@ export default function ContenedoresCerradosPage() {
 
       if (linesError) throw linesError;
 
-      // Agrupar métricas por container_id
       const metricsMap = new Map<string, { lineas: number; skus: Set<string>; unidades: number }>();
-
       (linesData || []).forEach((line: any) => {
         const cid = line.container_id;
-        if (!metricsMap.has(cid)) {
-          metricsMap.set(cid, { lineas: 0, skus: new Set(), unidades: 0 });
-        }
+        if (!metricsMap.has(cid)) metricsMap.set(cid, { lineas: 0, skus: new Set(), unidades: 0 });
         const m = metricsMap.get(cid)!;
         m.lineas += 1;
         m.skus.add(line.sku);
         m.unidades += Number(line.qty) || 0;
       });
 
-      // ✅ PASO 3: Mapear a ClosedContainerSummary
       const mapped: ClosedContainerSummary[] = containers.map((c: any) => {
         const metrics = metricsMap.get(c.id) || { lineas: 0, skus: new Set(), unidades: 0 };
         return {
@@ -206,26 +208,16 @@ export default function ContenedoresCerradosPage() {
   };
 
   /* ------------------------------------------------------------------ */
-  /*  ✅ Función lazy para cargar detalle de líneas de un contenedor    */
+  /*  Lazy detail loader                                                */
   /* ------------------------------------------------------------------ */
   const loadContainerDetail = async (containerId: string): Promise<ContainerLineDetail[]> => {
     try {
       const { data, error } = await supabase
         .from('container_lines')
         .select(`
-          id,
-          sku,
-          qty,
-          pallet_id,
-          source_import_line_id,
-          pallets (
-            pallet_code,
-            ubicacion
-          ),
-          import_lines (
-            descripcion,
-            barcode
-          )
+          id, sku, qty, pallet_id, source_import_line_id,
+          pallets ( pallet_code, ubicacion ),
+          import_lines ( descripcion, barcode )
         `)
         .eq('container_id', containerId)
         .order('sku', { ascending: true });
@@ -244,7 +236,6 @@ export default function ContenedoresCerradosPage() {
         source_import_line_id: line.source_import_line_id || null,
       }));
 
-      // ✅ Agrupar duplicados sumando qty
       return groupLines(raw);
     } catch (err) {
       console.error('[CC] Error loading container detail:', err);
@@ -254,40 +245,11 @@ export default function ContenedoresCerradosPage() {
   };
 
   /* ------------------------------------------------------------------ */
-  /*  Export ALL filtered data to .xlsx                                  */
+  /*  Export .xlsx (respeta filtro de carga)                            */
   /* ------------------------------------------------------------------ */
   const handleExportXlsx = async () => {
     setExporting(true);
     try {
-      // ✅ Fetch todos los contenedores filtrados (sin paginación)
-      let exportQuery = supabase
-        .from('containers')
-        .select('id, code, status, tienda, type, created_at, closed_at, dispatched_at');
-
-      if (filters.status === 'all') {
-        exportQuery = exportQuery.in('status', ['CLOSED', 'DISPATCHED']);
-      } else {
-        exportQuery = exportQuery.eq('status', filters.status);
-      }
-      if (filters.tienda !== 'all') {
-        exportQuery = exportQuery.eq('tienda', filters.tienda);
-      }
-      if (filters.dateFrom) {
-        exportQuery = exportQuery.gte('closed_at', `${filters.dateFrom}T00:00:00`);
-      }
-      if (filters.dateTo) {
-        exportQuery = exportQuery.lte('closed_at', `${filters.dateTo}T23:59:59`);
-      }
-      if (filters.searchTerm) {
-        const term = filters.searchTerm.trim();
-        exportQuery = exportQuery.ilike('code', `%${term}%`);
-      }
-
-      exportQuery = exportQuery
-        .order('closed_at', { ascending: false, nullsFirst: false })
-        .order('code', { ascending: true });
-
-      // Fetch en lotes de 1000
       let allContainers: any[] = [];
       let offset = 0;
       const batchSize = 1000;
@@ -297,40 +259,18 @@ export default function ContenedoresCerradosPage() {
         let batchQuery = supabase
           .from('containers')
           .select('id, code, status, tienda, type, created_at, closed_at, dispatched_at')
-          .range(offset, offset + batchSize - 1);
-
-        if (filters.status === 'all') {
-          batchQuery = batchQuery.in('status', ['CLOSED', 'DISPATCHED']);
-        } else {
-          batchQuery = batchQuery.eq('status', filters.status);
-        }
-        if (filters.tienda !== 'all') {
-          batchQuery = batchQuery.eq('tienda', filters.tienda);
-        }
-        if (filters.dateFrom) {
-          batchQuery = batchQuery.gte('closed_at', `${filters.dateFrom}T00:00:00`);
-        }
-        if (filters.dateTo) {
-          batchQuery = batchQuery.lte('closed_at', `${filters.dateTo}T23:59:59`);
-        }
-        if (filters.searchTerm) {
-          const term = filters.searchTerm.trim();
-          batchQuery = batchQuery.ilike('code', `%${term}%`);
-        }
-
-        batchQuery = batchQuery
+          .range(offset, offset + batchSize - 1)
           .order('closed_at', { ascending: false, nullsFirst: false })
           .order('code', { ascending: true });
+
+        batchQuery = applyFilters(batchQuery);
 
         const { data: batch, error } = await batchQuery;
         if (error) throw error;
 
         allContainers = allContainers.concat(batch || []);
-        if (!batch || batch.length < batchSize) {
-          hasMore = false;
-        } else {
-          offset += batchSize;
-        }
+        if (!batch || batch.length < batchSize) hasMore = false;
+        else offset += batchSize;
       }
 
       if (allContainers.length === 0) {
@@ -339,24 +279,13 @@ export default function ContenedoresCerradosPage() {
         return;
       }
 
-      // ✅ Obtener todas las líneas de estos contenedores
       const containerIds = allContainers.map((c) => c.id);
       const { data: allLines, error: linesError } = await supabase
         .from('container_lines')
         .select(`
-          container_id,
-          sku,
-          qty,
-          pallet_id,
-          source_import_line_id,
-          pallets (
-            pallet_code,
-            ubicacion
-          ),
-          import_lines (
-            descripcion,
-            barcode
-          )
+          container_id, sku, qty, pallet_id, source_import_line_id,
+          pallets ( pallet_code, ubicacion ),
+          import_lines ( descripcion, barcode )
         `)
         .in('container_id', containerIds)
         .order('container_id', { ascending: true })
@@ -364,20 +293,16 @@ export default function ContenedoresCerradosPage() {
 
       if (linesError) throw linesError;
 
-      // Agrupar métricas por container_id
       const metricsMap = new Map<string, { lineas: number; skus: Set<string>; unidades: number }>();
       (allLines || []).forEach((line: any) => {
         const cid = line.container_id;
-        if (!metricsMap.has(cid)) {
-          metricsMap.set(cid, { lineas: 0, skus: new Set(), unidades: 0 });
-        }
+        if (!metricsMap.has(cid)) metricsMap.set(cid, { lineas: 0, skus: new Set(), unidades: 0 });
         const m = metricsMap.get(cid)!;
         m.lineas += 1;
         m.skus.add(line.sku);
         m.unidades += Number(line.qty) || 0;
       });
 
-      // ✅ Sheet 1: Resumen (1 fila por contenedor)
       const resumenRows = allContainers.map((c: any) => {
         const metrics = metricsMap.get(c.id) || { lineas: 0, skus: new Set(), unidades: 0 };
         return {
@@ -394,10 +319,7 @@ export default function ContenedoresCerradosPage() {
         };
       });
 
-      // ✅ Sheet 2: Detalle (1 fila por línea, agrupada)
       const containerMap = new Map(allContainers.map((c) => [c.id, c]));
-
-      // Agrupar líneas por contenedor, luego aplicar groupLines
       const linesByContainer = new Map<string, any[]>();
       for (const line of (allLines || [])) {
         const cid = line.container_id;
@@ -408,8 +330,6 @@ export default function ContenedoresCerradosPage() {
       const detalleRows: any[] = [];
       for (const [cid, rawLines] of linesByContainer.entries()) {
         const container = containerMap.get(cid);
-
-        // Mapear a ContainerLineDetail para poder agrupar
         const mapped: ContainerLineDetail[] = rawLines.map((line: any) => ({
           id: line.id,
           sku: line.sku,
@@ -423,7 +343,6 @@ export default function ContenedoresCerradosPage() {
         }));
 
         const grouped = groupLines(mapped);
-
         for (const line of grouped) {
           detalleRows.push({
             Container: container?.code || '',
@@ -441,32 +360,26 @@ export default function ContenedoresCerradosPage() {
         }
       }
 
-      // ✅ Crear workbook con 2 sheets
       const wb = XLSX.utils.book_new();
 
       const wsResumen = XLSX.utils.json_to_sheet(resumenRows);
-      const colWidthsResumen = Object.keys(resumenRows[0] || {}).map((key) => {
-        const maxLen = Math.max(
-          key.length,
-          ...resumenRows.map((r: any) => String(r[key] ?? '').length),
-        );
-        return { wch: Math.min(maxLen + 2, 40) };
-      });
-      wsResumen['!cols'] = colWidthsResumen;
+      wsResumen['!cols'] = Object.keys(resumenRows[0] || {}).map((key) => ({
+        wch: Math.min(Math.max(key.length, ...resumenRows.map((r: any) => String(r[key] ?? '').length)) + 2, 40),
+      }));
       XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
 
       const wsDetalle = XLSX.utils.json_to_sheet(detalleRows);
-      const colWidthsDetalle = Object.keys(detalleRows[0] || {}).map((key) => {
-        const maxLen = Math.max(
-          key.length,
-          ...detalleRows.slice(0, 100).map((r: any) => String(r[key] ?? '').length),
-        );
-        return { wch: Math.min(maxLen + 2, 40) };
-      });
-      wsDetalle['!cols'] = colWidthsDetalle;
+      wsDetalle['!cols'] = Object.keys(detalleRows[0] || {}).map((key) => ({
+        wch: Math.min(Math.max(key.length, ...detalleRows.slice(0, 100).map((r: any) => String(r[key] ?? '').length)) + 2, 40),
+      }));
       XLSX.utils.book_append_sheet(wb, wsDetalle, 'Detalle');
 
-      XLSX.writeFile(wb, `contenedores_cerrados_${new Date().toISOString().split('T')[0]}.xlsx`);
+      // Nombre del archivo incluye la carga si está filtrada
+      const selectedImport = imports.find((i) => i.id === filters.importId);
+      const suffix = selectedImport
+        ? `_${selectedImport.file_name.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30)}`
+        : '';
+      XLSX.writeFile(wb, `contenedores_cerrados${suffix}_${new Date().toISOString().split('T')[0]}.xlsx`);
       showToast('success', 'Exportado', `${resumenRows.length} contenedores, ${detalleRows.length} líneas descargadas`);
     } catch (err) {
       console.error('[CC] Export error:', err);
@@ -517,7 +430,12 @@ export default function ContenedoresCerradosPage() {
         </button>
       </div>
 
-      <ClosedContainersFilters tiendas={tiendas} onFilterChange={handleFilterChange} />
+      <ClosedContainersFilters
+        tiendas={tiendas}
+        imports={imports}
+        loadingImports={loadingImports}
+        onFilterChange={handleFilterChange}
+      />
 
       <ClosedContainersTable
         rows={rows}

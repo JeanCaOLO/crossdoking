@@ -10,7 +10,7 @@ export interface TiendaProgress {
   percent: number;
 }
 
-export function useTiendaProgress() {
+export function useTiendaProgress(importId: string | null = null) {
   const [data, setData] = useState<TiendaProgress[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -18,30 +18,36 @@ export function useTiendaProgress() {
     fetchProgress();
     const interval = setInterval(fetchProgress, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [importId]);
 
   const fetchProgress = async () => {
     try {
-      // Obtener la importación más reciente (cualquier estado excepto CANCELLED)
-      const { data: recentImport } = await supabase
-        .from('imports')
-        .select('id, status')
-        .neq('status', 'CANCELLED')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      let targetImportId = importId;
 
-      if (!recentImport) {
-        setData([]);
-        setLoading(false);
-        return;
+      // Si no hay importId seleccionado, obtener la importación más reciente
+      if (!targetImportId) {
+        const { data: recentImport } = await supabase
+          .from('imports')
+          .select('id, status')
+          .neq('status', 'CANCELLED')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!recentImport) {
+          setData([]);
+          setLoading(false);
+          return;
+        }
+
+        targetImportId = recentImport.id;
       }
 
       // Obtener líneas agrupadas por tienda
       const { data: lines } = await supabase
         .from('import_lines')
         .select('tienda, camion, qty_to_send, qty_confirmed')
-        .eq('import_id', recentImport.id)
+        .eq('import_id', targetImportId)
         .not('tienda', 'is', null);
 
       if (!lines || lines.length === 0) {

@@ -10,7 +10,7 @@ export interface RecentActivity {
   color: string;
 }
 
-export function useRecentActivity() {
+export function useRecentActivity(importId: string | null = null) {
   const [activities, setActivities] = useState<RecentActivity[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -19,15 +19,56 @@ export function useRecentActivity() {
     const interval = setInterval(fetchActivities, 15000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [importId]);
 
   const fetchActivities = async () => {
     try {
-      const { data: events, error } = await supabase
+      // Si hay importId, filtrar eventos por pallets de esa carga
+      let query = supabase
         .from('scan_events')
         .select('id, event_type, raw_code, sku, tienda, qty, notes, created_at, pallet_id')
         .order('created_at', { ascending: false })
         .limit(8);
+
+      if (importId) {
+        // Obtener pallet_codes de la carga
+        const { data: lines } = await supabase
+          .from('import_lines')
+          .select('pallet_code')
+          .eq('import_id', importId);
+
+        if (!lines || lines.length === 0) {
+          setActivities([]);
+          setLoading(false);
+          return;
+        }
+
+        const palletCodes = [...new Set(lines.map(l => l.pallet_code).filter(Boolean))];
+
+        // Obtener IDs de pallets
+        const { data: pallets } = await supabase
+          .from('pallets')
+          .select('id')
+          .in('pallet_code', palletCodes);
+
+        if (!pallets || pallets.length === 0) {
+          setActivities([]);
+          setLoading(false);
+          return;
+        }
+
+        const palletIds = pallets.map(p => p.id);
+
+        // Filtrar eventos por esos pallets
+        query = supabase
+          .from('scan_events')
+          .select('id, event_type, raw_code, sku, tienda, qty, notes, created_at, pallet_id')
+          .in('pallet_id', palletIds)
+          .order('created_at', { ascending: false })
+          .limit(8);
+      }
+
+      const { data: events, error } = await query;
 
       if (error) {
         throw error;
