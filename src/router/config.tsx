@@ -5,6 +5,8 @@ import AppLayout from '../components/layout/AppLayout';
 import { useAuth, UserRole } from '../contexts/AuthContext';
 
 const DashboardPage = lazy(() => import('../pages/dashboard/page'));
+const DashboardEmbedPage = lazy(() => import('../pages/dashboard/embed/page'));
+const DashboardIframeConfigPage = lazy(() => import('../pages/dashboard/iframe-config/page'));
 const LoginPage = lazy(() => import('../pages/login/page'));
 const CargasPage = lazy(() => import('../pages/cargas/page'));
 const NuevaCargaPage = lazy(() => import('../pages/cargas/nueva/page'));
@@ -55,11 +57,20 @@ function RootRedirect() {
 const routes: RouteObject[] = [
   { path: '/', element: <RootRedirect /> },
   { path: '/login', element: <LoginPage /> },
+  { path: '/dashboard-embed', element: <DashboardEmbedPage /> },
   {
     path: '/dashboard',
     element: (
       <WithLayout allowedRoles={['ADMIN', 'VISUALIZADOR']}>
         <DashboardPage />
+      </WithLayout>
+    ),
+  },
+  {
+    path: '/dashboard/iframe-config',
+    element: (
+      <WithLayout allowedRoles={['ADMIN']}>
+        <DashboardIframeConfigPage />
       </WithLayout>
     ),
   },
