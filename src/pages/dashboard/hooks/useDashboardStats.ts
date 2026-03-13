@@ -314,7 +314,7 @@ export function useDashboardStats(refreshInterval = 10000, importId: string | nu
               .from('import_lines')
               .select('camion'),
         
-        // Total unidades
+        // Total unidades - NUEVA LÓGICA: usar qty_to_send como base
         importId
           ? supabase
               .from('import_lines')
@@ -327,7 +327,6 @@ export function useDashboardStats(refreshInterval = 10000, importId: string | nu
 
       const tl = totalLines?.count ?? 0;
       const dl = doneLines?.count ?? 0;
-      const progress = tl > 0 ? Math.round((dl / tl) * 100) : 0;
 
       // Calcular SKUs únicos
       const skuSet = new Set(uniqueSKUs?.data?.map(item => item.sku).filter(Boolean) ?? []);
@@ -338,10 +337,22 @@ export function useDashboardStats(refreshInterval = 10000, importId: string | nu
       // Calcular camiones únicos
       const camionSet = new Set(uniqueCamiones?.data?.map(item => item.camion).filter(Boolean) ?? []);
 
-      // Calcular totales de unidades
+      // ✅ NUEVA LÓGICA: Base = qty_to_send (cantidad solicitada)
       const totalUnits = totalUnitsData?.data?.reduce((sum, line) => sum + (line.qty_to_send || 0), 0) ?? 0;
       const totalConfirmed = totalUnitsData?.data?.reduce((sum, line) => sum + (line.qty_confirmed || 0), 0) ?? 0;
       const totalPending = Math.max(0, totalUnits - totalConfirmed);
+      
+      // ✅ Progreso basado en qty_to_send
+      const progressPercent = totalUnits > 0 ? Math.round((totalConfirmed / totalUnits) * 100) : 0;
+
+      // 🔍 Logs de validación
+      console.log('[DASHBOARD_METRICS]', {
+        import_id: importId || 'Todas las cargas',
+        total_qty_to_send: totalUnits,
+        total_qty_confirmed: totalConfirmed,
+        total_pending: totalPending,
+        progress_percent: progressPercent,
+      });
 
       setStats({
         activeImports: activeImports?.count ?? 0,
@@ -362,7 +373,7 @@ export function useDashboardStats(refreshInterval = 10000, importId: string | nu
         totalUnits,
         totalConfirmed,
         totalPending,
-        progressPercent: progress,
+        progressPercent,
       });
 
       setLastUpdated(new Date());

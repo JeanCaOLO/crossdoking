@@ -43,7 +43,7 @@ export function useTiendaProgress(importId: string | null = null) {
         targetImportId = recentImport.id;
       }
 
-      // Obtener líneas agrupadas por tienda
+      // ✅ NUEVA LÓGICA: Obtener líneas con qty_to_send como base
       const { data: lines } = await supabase
         .from('import_lines')
         .select('tienda, camion, qty_to_send, qty_confirmed')
@@ -67,6 +67,7 @@ export function useTiendaProgress(importId: string | null = null) {
             confirmed: 0,
           };
         }
+        // ✅ Base = qty_to_send (cantidad solicitada)
         acc[key].total += line.qty_to_send || 0;
         acc[key].confirmed += line.qty_confirmed || 0;
         return acc;
@@ -74,14 +75,28 @@ export function useTiendaProgress(importId: string | null = null) {
 
       // Convertir a array y calcular porcentajes
       const result: TiendaProgress[] = Object.values(grouped)
-        .map((g) => ({
-          tienda: g.tienda,
-          camion: g.camion,
-          total: g.total,
-          confirmed: g.confirmed,
-          pending: g.total - g.confirmed,
-          percent: g.total > 0 ? Math.round((g.confirmed / g.total) * 100) : 0,
-        }))
+        .map((g) => {
+          const pending = Math.max(0, g.total - g.confirmed);
+          const percent = g.total > 0 ? Math.round((g.confirmed / g.total) * 100) : 0;
+          
+          // 🔍 Log por tienda
+          console.log('[DASHBOARD_METRICS] Tienda:', {
+            tienda: g.tienda,
+            total_qty_to_send: g.total,
+            total_qty_confirmed: g.confirmed,
+            pending,
+            percent,
+          });
+          
+          return {
+            tienda: g.tienda,
+            camion: g.camion,
+            total: g.total,
+            confirmed: g.confirmed,
+            pending,
+            percent,
+          };
+        })
         .sort((a, b) => b.percent - a.percent);
 
       setData(result);
