@@ -851,6 +851,7 @@ export default function OperacionPage() {
           pallet={selectedPallet}
           inventory={palletInventory}
           pendingLines={filteredPendingLines}
+          importId={targetContainer?.import_id ?? filteredPendingLines[0]?.import_id ?? pendingLines[0]?.import_id}
           continueMode={continueMode}
           targetContainer={targetContainer}
           onClose={() => {

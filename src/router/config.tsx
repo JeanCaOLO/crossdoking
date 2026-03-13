@@ -17,6 +17,7 @@ const ReportesMovimientosPage = lazy(() => import('../pages/reportes/page'));
 const ContenedoresPage = lazy(() => import('../pages/contenedores/page'));
 const ContenedorDetallePage = lazy(() => import('../pages/contenedores/detalle/page'));
 const ContenedoresCerradosPage = lazy(() => import('../pages/reportes/contenedores_cerrados/page'));
+const PalletsPendientesPage = lazy(() => import('../pages/pallets-pendientes/page'));
 
 function WithLayout({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: UserRole[] }) {
   return (
@@ -111,6 +112,14 @@ const routes: RouteObject[] = [
     element: (
       <WithLayout allowedRoles={['ADMIN', 'OPERATOR']}>
         <ReportesPage />
+      </WithLayout>
+    ),
+  },
+  {
+    path: '/pallets-pendientes',
+    element: (
+      <WithLayout allowedRoles={['ADMIN', 'OPERATOR']}>
+        <PalletsPendientesPage />
       </WithLayout>
     ),
   },

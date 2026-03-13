@@ -1,4 +1,3 @@
-
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -13,6 +12,7 @@ const navItems = [
   { path: '/cargas', label: 'Cargas', icon: 'ri-file-list-3-line', roles: ['ADMIN'] },
   { path: '/cargas/nueva', label: 'Nueva Carga', icon: 'ri-file-excel-2-line', roles: ['ADMIN'] },
   { path: '/operacion', label: 'Operación', icon: 'ri-qr-scan-2-line', roles: ['ADMIN', 'OPERATOR'] },
+  { path: '/pallets-pendientes', label: 'Pallets Pendientes', icon: 'ri-inbox-unarchive-line', roles: ['ADMIN', 'OPERATOR'] },
   { path: '/contenedores', label: 'Contenedores', icon: 'ri-inbox-line', roles: ['ADMIN', 'OPERATOR'] },
   { path: '/reportes', label: 'Reportes', icon: 'ri-bar-chart-box-line', roles: ['ADMIN', 'VISUALIZADOR'] },
   { path: '/reportes/contenedores-cerrados', label: 'Cont. Cerrados', icon: 'ri-archive-line', roles: ['ADMIN', 'VISUALIZADOR'] },
