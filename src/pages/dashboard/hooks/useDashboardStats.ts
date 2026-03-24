@@ -45,6 +45,35 @@ const defaultStats: DashboardStats = {
   progressPercent: 0,
 };
 
+// ─── Paginación universal ─────────────────────────────────────────────────────
+// Supabase limita las queries de datos a 1000 filas por defecto.
+// Esta función pagina automáticamente hasta traer todos los registros.
+async function fetchAllPages<T>(
+  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
+): Promise<T[]> {
+  const PAGE_SIZE = 1000;
+  const all: T[] = [];
+  let page = 0;
+
+  while (true) {
+    const from = page * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    const { data, error } = await buildQuery(from, to);
+
+    if (error) {
+      console.error('[DASHBOARD] fetchAllPages error:', error);
+      break;
+    }
+
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < PAGE_SIZE) break;
+    page++;
+  }
+
+  return all;
+}
+
 export function useDashboardStats(refreshInterval = 10000, importId: string | null = null) {
   const [stats, setStats] = useState<DashboardStats>(defaultStats);
   const [loading, setLoading] = useState(true);
@@ -52,302 +81,170 @@ export function useDashboardStats(refreshInterval = 10000, importId: string | nu
 
   const fetchStats = useCallback(async () => {
     try {
-      // Si hay un importId seleccionado, filtrar por esa carga
-      const importFilter = importId ? { import_id: importId } : {};
+      // ─── Resolver qué import IDs usar ──────────────────────────────
+      let activeImportIds: string[] | null = null;
 
+      if (!importId) {
+        const { data: importsData } = await supabase
+          .from('imports')
+          .select('id')
+          .neq('status', 'CANCELLED');
+
+        activeImportIds = (importsData ?? []).map((r) => r.id);
+
+        if (activeImportIds.length === 0) {
+          setStats(defaultStats);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // ─── Helper: aplicar filtro import_id ──────────────────────────
+      const applyImportFilter = (q: ReturnType<typeof supabase.from>) => {
+        if (importId) return (q as any).eq('import_id', importId);
+        return (q as any).in('import_id', activeImportIds!);
+      };
+
+      // ─── Fetches paralelos de conteos (server-side, sin límite) ────
       const [
-        activeImports,
-        doneImports,
+        activeImportsCount,
+        doneImportsCount,
         totalLines,
         pendingLines,
         partialLines,
         doneLines,
-        openPallets,
-        totalPallets,
-        openContainers,
-        closedContainers,
-        dispatchedContainers,
-        totalEvents,
-        uniqueSKUs,
-        uniqueTiendas,
-        uniqueCamiones,
-        totalUnitsData,
       ] = await Promise.all([
-        // Imports activos
-        importId
-          ? supabase
-              .from('imports')
-              .select('id', { count: 'exact', head: true })
-              .eq('id', importId)
-              .in('status', ['DRAFT', 'IN_PROGRESS'])
-          : supabase
-              .from('imports')
-              .select('id', { count: 'exact', head: true })
-              .in('status', ['DRAFT', 'IN_PROGRESS']),
-        
-        // Imports completados
-        importId
-          ? supabase
-              .from('imports')
-              .select('id', { count: 'exact', head: true })
-              .eq('id', importId)
-              .eq('status', 'DONE')
-          : supabase
-              .from('imports')
-              .select('id', { count: 'exact', head: true })
-              .eq('status', 'DONE'),
-        
-        // Total de líneas
-        importId
-          ? supabase
-              .from('import_lines')
-              .select('id', { count: 'exact', head: true })
-              .eq('import_id', importId)
-          : supabase
-              .from('import_lines')
-              .select('id', { count: 'exact', head: true }),
-        
-        // Líneas pendientes
-        importId
-          ? supabase
-              .from('import_lines')
-              .select('id', { count: 'exact', head: true })
-              .eq('import_id', importId)
-              .eq('status', 'PENDING')
-          : supabase
-              .from('import_lines')
-              .select('id', { count: 'exact', head: true })
-              .eq('status', 'PENDING'),
-        
-        // Líneas parciales
-        importId
-          ? supabase
-              .from('import_lines')
-              .select('id', { count: 'exact', head: true })
-              .eq('import_id', importId)
-              .eq('status', 'PARTIAL')
-          : supabase
-              .from('import_lines')
-              .select('id', { count: 'exact', head: true })
-              .eq('status', 'PARTIAL'),
-        
-        // Líneas completadas
-        importId
-          ? supabase
-              .from('import_lines')
-              .select('id', { count: 'exact', head: true })
-              .eq('import_id', importId)
-              .eq('status', 'DONE')
-          : supabase
-              .from('import_lines')
-              .select('id', { count: 'exact', head: true })
-              .eq('status', 'DONE'),
-        
-        // Pallets abiertos (filtrar por pallet_codes de la carga si aplica)
-        importId
-          ? (async () => {
-              const { data: lines } = await supabase
-                .from('import_lines')
-                .select('pallet_code')
-                .eq('import_id', importId);
-              
-              if (!lines || lines.length === 0) return { count: 0 };
-              
-              const palletCodes = [...new Set(lines.map(l => l.pallet_code).filter(Boolean))];
-              
-              return supabase
-                .from('pallets')
-                .select('id', { count: 'exact', head: true })
-                .in('pallet_code', palletCodes)
-                .eq('status', 'OPEN');
-            })()
-          : supabase
-              .from('pallets')
-              .select('id', { count: 'exact', head: true })
-              .eq('status', 'OPEN'),
-        
-        // Total pallets
-        importId
-          ? (async () => {
-              const { data: lines } = await supabase
-                .from('import_lines')
-                .select('pallet_code')
-                .eq('import_id', importId);
-              
-              if (!lines || lines.length === 0) return { count: 0 };
-              
-              const palletCodes = [...new Set(lines.map(l => l.pallet_code).filter(Boolean))];
-              
-              return supabase
-                .from('pallets')
-                .select('id', { count: 'exact', head: true })
-                .in('pallet_code', palletCodes);
-            })()
-          : supabase.from('pallets').select('id', { count: 'exact', head: true }),
-        
-        // Contenedores abiertos (filtrar por tiendas de la carga si aplica)
-        importId
-          ? (async () => {
-              const { data: lines } = await supabase
-                .from('import_lines')
-                .select('tienda')
-                .eq('import_id', importId);
-              
-              if (!lines || lines.length === 0) return { count: 0 };
-              
-              const tiendas = [...new Set(lines.map(l => l.tienda).filter(Boolean))];
-              
-              return supabase
-                .from('containers')
-                .select('id', { count: 'exact', head: true })
-                .in('tienda', tiendas)
-                .eq('status', 'OPEN');
-            })()
-          : supabase
-              .from('containers')
-              .select('id', { count: 'exact', head: true })
-              .eq('status', 'OPEN'),
-        
-        // Contenedores cerrados
-        importId
-          ? (async () => {
-              const { data: lines } = await supabase
-                .from('import_lines')
-                .select('tienda')
-                .eq('import_id', importId);
-              
-              if (!lines || lines.length === 0) return { count: 0 };
-              
-              const tiendas = [...new Set(lines.map(l => l.tienda).filter(Boolean))];
-              
-              return supabase
-                .from('containers')
-                .select('id', { count: 'exact', head: true })
-                .in('tienda', tiendas)
-                .eq('status', 'CLOSED');
-            })()
-          : supabase
-              .from('containers')
-              .select('id', { count: 'exact', head: true })
-              .eq('status', 'CLOSED'),
-        
-        // Contenedores despachados
-        importId
-          ? (async () => {
-              const { data: lines } = await supabase
-                .from('import_lines')
-                .select('tienda')
-                .eq('import_id', importId);
-              
-              if (!lines || lines.length === 0) return { count: 0 };
-              
-              const tiendas = [...new Set(lines.map(l => l.tienda).filter(Boolean))];
-              
-              return supabase
-                .from('containers')
-                .select('id', { count: 'exact', head: true })
-                .in('tienda', tiendas)
-                .eq('status', 'DISPATCHED');
-            })()
-          : supabase
-              .from('containers')
-              .select('id', { count: 'exact', head: true })
-              .eq('status', 'DISPATCHED'),
-        
-        // Total eventos (filtrar por pallets de la carga si aplica)
-        importId
-          ? (async () => {
-              const { data: lines } = await supabase
-                .from('import_lines')
-                .select('pallet_code')
-                .eq('import_id', importId);
-              
-              if (!lines || lines.length === 0) return { count: 0 };
-              
-              const palletCodes = [...new Set(lines.map(l => l.pallet_code).filter(Boolean))];
-              
-              const { data: pallets } = await supabase
-                .from('pallets')
-                .select('id')
-                .in('pallet_code', palletCodes);
-              
-              if (!pallets || pallets.length === 0) return { count: 0 };
-              
-              const palletIds = pallets.map(p => p.id);
-              
-              return supabase
-                .from('scan_events')
-                .select('id', { count: 'exact', head: true })
-                .in('pallet_id', palletIds);
-            })()
-          : supabase
-              .from('scan_events')
-              .select('id', { count: 'exact', head: true }),
-        
-        // SKUs únicos
-        importId
-          ? supabase
-              .from('import_lines')
-              .select('sku')
-              .eq('import_id', importId)
-          : supabase
-              .from('import_lines')
-              .select('sku'),
-        
-        // Tiendas únicas
-        importId
-          ? supabase
-              .from('import_lines')
-              .select('tienda')
-              .eq('import_id', importId)
-          : supabase
-              .from('import_lines')
-              .select('tienda'),
-        
-        // Camiones únicos
-        importId
-          ? supabase
-              .from('import_lines')
-              .select('camion')
-              .eq('import_id', importId)
-          : supabase
-              .from('import_lines')
-              .select('camion'),
-        
-        // Total unidades - NUEVA LÓGICA: usar qty_to_send como base
-        importId
-          ? supabase
-              .from('import_lines')
-              .select('qty_to_send, qty_confirmed')
-              .eq('import_id', importId)
-          : supabase
-              .from('import_lines')
-              .select('qty_to_send, qty_confirmed'),
+        (() => {
+          const q = supabase.from('imports').select('id', { count: 'exact', head: true }).in('status', ['DRAFT', 'IN_PROGRESS']);
+          if (importId) return (q as any).eq('id', importId);
+          if (activeImportIds) return (q as any).in('id', activeImportIds);
+          return q;
+        })(),
+        (() => {
+          const q = supabase.from('imports').select('id', { count: 'exact', head: true }).eq('status', 'DONE');
+          if (importId) return (q as any).eq('id', importId);
+          if (activeImportIds) return (q as any).in('id', activeImportIds);
+          return q;
+        })(),
+        (() => {
+          const q = supabase.from('import_lines').select('id', { count: 'exact', head: true });
+          return applyImportFilter(q);
+        })(),
+        (() => {
+          const q = supabase.from('import_lines').select('id', { count: 'exact', head: true }).eq('status', 'PENDING');
+          return applyImportFilter(q);
+        })(),
+        (() => {
+          const q = supabase.from('import_lines').select('id', { count: 'exact', head: true }).eq('status', 'PARTIAL');
+          return applyImportFilter(q);
+        })(),
+        (() => {
+          const q = supabase.from('import_lines').select('id', { count: 'exact', head: true }).eq('status', 'DONE');
+          return applyImportFilter(q);
+        })(),
       ]);
 
-      const tl = totalLines?.count ?? 0;
-      const dl = doneLines?.count ?? 0;
+      // ─── Traer TODAS las líneas con paginación ─────────────────────
+      // qty_to_send y qty_confirmed — crítico: paginar para no perder filas
+      const qtyLines = await fetchAllPages<{ qty_to_send: number; qty_confirmed: number }>(
+        (from, to) => {
+          const q = supabase
+            .from('import_lines')
+            .select('qty_to_send, qty_confirmed')
+            .range(from, to);
+          if (importId) return (q as any).eq('import_id', importId);
+          return (q as any).in('import_id', activeImportIds!);
+        }
+      );
 
-      // Calcular SKUs únicos
-      const skuSet = new Set(uniqueSKUs?.data?.map(item => item.sku).filter(Boolean) ?? []);
-      
-      // Calcular tiendas únicas
-      const tiendaSet = new Set(uniqueTiendas?.data?.map(item => item.tienda).filter(Boolean) ?? []);
-      
-      // Calcular camiones únicos
-      const camionSet = new Set(uniqueCamiones?.data?.map(item => item.camion).filter(Boolean) ?? []);
+      // pallet_codes únicos con paginación
+      const palletLinesRaw = await fetchAllPages<{ pallet_code: string }>(
+        (from, to) => {
+          const q = supabase.from('import_lines').select('pallet_code').range(from, to);
+          if (importId) return (q as any).eq('import_id', importId);
+          return (q as any).in('import_id', activeImportIds!);
+        }
+      );
+      const uniquePalletCodes = [...new Set(palletLinesRaw.map((l) => l.pallet_code).filter(Boolean))];
 
-      // ✅ NUEVA LÓGICA: Base = qty_to_send (cantidad solicitada)
-      const totalUnits = totalUnitsData?.data?.reduce((sum, line) => sum + (line.qty_to_send || 0), 0) ?? 0;
-      const totalConfirmed = totalUnitsData?.data?.reduce((sum, line) => sum + (line.qty_confirmed || 0), 0) ?? 0;
+      // tiendas únicas con paginación
+      const tiendaLinesRaw = await fetchAllPages<{ tienda: string }>(
+        (from, to) => {
+          const q = supabase.from('import_lines').select('tienda').range(from, to);
+          if (importId) return (q as any).eq('import_id', importId);
+          return (q as any).in('import_id', activeImportIds!);
+        }
+      );
+      const uniqueTiendaList = [...new Set(tiendaLinesRaw.map((l) => l.tienda).filter(Boolean))];
+
+      // SKUs únicos con paginación
+      const skuLinesRaw = await fetchAllPages<{ sku: string }>(
+        (from, to) => {
+          const q = supabase.from('import_lines').select('sku').range(from, to);
+          if (importId) return (q as any).eq('import_id', importId);
+          return (q as any).in('import_id', activeImportIds!);
+        }
+      );
+      const uniqueSkuList = [...new Set(skuLinesRaw.map((l) => l.sku).filter(Boolean))];
+
+      // camiones únicos con paginación
+      const camionLinesRaw = await fetchAllPages<{ camion: string }>(
+        (from, to) => {
+          const q = supabase.from('import_lines').select('camion').range(from, to);
+          if (importId) return (q as any).eq('import_id', importId);
+          return (q as any).in('import_id', activeImportIds!);
+        }
+      );
+      const uniqueCamionList = [...new Set(camionLinesRaw.map((l) => l.camion).filter(Boolean))];
+
+      // ─── Conteos de pallets y contenedores (server-side count) ─────
+      const [openPallets, totalPallets, openContainers, closedContainers, dispatchedContainers] =
+        await Promise.all([
+          uniquePalletCodes.length > 0
+            ? supabase.from('pallets').select('id', { count: 'exact', head: true }).in('pallet_code', uniquePalletCodes).eq('status', 'OPEN')
+            : Promise.resolve({ count: 0 }),
+          uniquePalletCodes.length > 0
+            ? supabase.from('pallets').select('id', { count: 'exact', head: true }).in('pallet_code', uniquePalletCodes)
+            : Promise.resolve({ count: 0 }),
+          uniqueTiendaList.length > 0
+            ? supabase.from('containers').select('id', { count: 'exact', head: true }).in('tienda', uniqueTiendaList).eq('status', 'OPEN')
+            : Promise.resolve({ count: 0 }),
+          uniqueTiendaList.length > 0
+            ? supabase.from('containers').select('id', { count: 'exact', head: true }).in('tienda', uniqueTiendaList).eq('status', 'CLOSED')
+            : Promise.resolve({ count: 0 }),
+          uniqueTiendaList.length > 0
+            ? supabase.from('containers').select('id', { count: 'exact', head: true }).in('tienda', uniqueTiendaList).eq('status', 'DISPATCHED')
+            : Promise.resolve({ count: 0 }),
+        ]);
+
+      // ─── Total eventos ──────────────────────────────────────────────
+      let totalEventsCount = 0;
+      if (uniquePalletCodes.length > 0) {
+        const { data: pallets } = await supabase
+          .from('pallets')
+          .select('id')
+          .in('pallet_code', uniquePalletCodes);
+
+        if (pallets && pallets.length > 0) {
+          const palletIds = pallets.map((p) => p.id);
+          const { count } = await supabase
+            .from('scan_events')
+            .select('id', { count: 'exact', head: true })
+            .in('pallet_id', palletIds);
+          totalEventsCount = count ?? 0;
+        }
+      }
+
+      // ─── Calcular métricas de unidades ─────────────────────────────
+      const totalUnits = qtyLines.reduce((sum, l) => sum + (l.qty_to_send || 0), 0);
+      const totalConfirmed = qtyLines.reduce((sum, l) => sum + (l.qty_confirmed || 0), 0);
       const totalPending = Math.max(0, totalUnits - totalConfirmed);
-      
-      // ✅ Progreso basado en qty_to_send
       const progressPercent = totalUnits > 0 ? Math.round((totalConfirmed / totalUnits) * 100) : 0;
 
-      // 🔍 Logs de validación
       console.log('[DASHBOARD_METRICS]', {
         import_id: importId || 'Todas las cargas',
+        active_import_ids_count: activeImportIds ? activeImportIds.length : 1,
+        total_rows_fetched: qtyLines.length,
         total_qty_to_send: totalUnits,
         total_qty_confirmed: totalConfirmed,
         total_pending: totalPending,
@@ -355,21 +252,21 @@ export function useDashboardStats(refreshInterval = 10000, importId: string | nu
       });
 
       setStats({
-        activeImports: activeImports?.count ?? 0,
-        doneImports: doneImports?.count ?? 0,
-        totalLines: tl,
+        activeImports: activeImportsCount?.count ?? 0,
+        doneImports: doneImportsCount?.count ?? 0,
+        totalLines: totalLines?.count ?? 0,
         pendingLines: pendingLines?.count ?? 0,
         partialLines: partialLines?.count ?? 0,
-        doneLines: dl,
+        doneLines: doneLines?.count ?? 0,
         openPallets: openPallets?.count ?? 0,
         totalPallets: totalPallets?.count ?? 0,
         openContainers: openContainers?.count ?? 0,
         closedContainers: closedContainers?.count ?? 0,
         dispatchedContainers: dispatchedContainers?.count ?? 0,
-        totalEvents: totalEvents?.count ?? 0,
-        totalCamiones: camionSet.size,
-        totalSKUs: skuSet.size,
-        totalTiendas: tiendaSet.size,
+        totalEvents: totalEventsCount,
+        totalCamiones: uniqueCamionList.length,
+        totalSKUs: uniqueSkuList.length,
+        totalTiendas: uniqueTiendaList.length,
         totalUnits,
         totalConfirmed,
         totalPending,
